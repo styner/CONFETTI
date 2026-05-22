@@ -9,6 +9,7 @@ point-data array on the output.
 """
 
 import argparse
+import csv
 import sys
 from pathlib import Path
 
@@ -160,6 +161,141 @@ def build_axis_polydata(
     return polydata
 
 
+_HEMISPHERE_MAP = {"l": "left", "r": "right"}
+_NOISE_TOKENS = frozenset({"parametrized", "axis"})
+
+
+def _tokenize_name(name: str) -> frozenset[str]:
+    """Normalize a fiber or profile-folder name into a comparable token set.
+
+    Lowercases, splits on underscores, drops noise tokens like 'parametrized',
+    and maps the hemisphere indicators 'l'/'r' to 'left'/'right' so they can
+    appear anywhere in either name.
+    """
+    stem = Path(name).stem.lower()
+    tokens: set[str] = set()
+    for raw in stem.split("_"):
+        if not raw or raw in _NOISE_TOKENS:
+            continue
+        tokens.add(_HEMISPHERE_MAP.get(raw, raw))
+    return frozenset(tokens)
+
+
+def find_profile_subfolder(base: Path, fiber_stem: str) -> Path | None:
+    """Find the immediate subfolder of `base` whose tokenized name equals the
+    fiber's. Returns None if no folder matches. Raises if multiple do."""
+    target = _tokenize_name(fiber_stem)
+    if not target:
+        return None
+    matches = [
+        d for d in sorted(base.iterdir())
+        if d.is_dir() and _tokenize_name(d.name) == target
+    ]
+    if len(matches) > 1:
+        raise SystemExit(
+            f"Ambiguous profile match for {fiber_stem}: "
+            f"{[m.name for m in matches]}"
+        )
+    return matches[0] if matches else None
+
+
+def resolve_profiles_dir(arg_path: Path, fiber_stem: str) -> Path:
+    """Resolve --profiles-dir: if it contains *.csv directly, treat it as the
+    leaf folder; otherwise search its subfolders for a token-set match to the
+    fiber stem."""
+    if any(arg_path.glob("*.csv")):
+        return arg_path
+    match = find_profile_subfolder(arg_path, fiber_stem)
+    if match is None:
+        raise SystemExit(
+            f"No subfolder of {arg_path} matches fiber '{fiber_stem}'. "
+            "Pass a leaf profile folder explicitly via --profiles-dir."
+        )
+    return match
+
+
+def read_profile_csv(path: Path) -> tuple[np.ndarray, list[str], np.ndarray]:
+    """Read a profile CSV. Returns (arc_length, subject_ids, values) where
+    `values` has shape (n_arc, n_subjects). Rows are sorted by arc length."""
+    with path.open(newline="") as f:
+        reader = csv.reader(f)
+        try:
+            header = next(reader)
+        except StopIteration as exc:
+            raise SystemExit(f"Empty profile CSV: {path}") from exc
+        rows = [row for row in reader if row]
+
+    if len(header) < 2:
+        raise SystemExit(f"Profile CSV needs at least 2 columns: {path}")
+
+    subjects = header[1:]
+    data = np.array(rows, dtype=np.float64)
+    arc = data[:, 0]
+    values = data[:, 1:]
+    order = np.argsort(arc)
+    return arc[order], subjects, values[order]
+
+
+def process_profiles(
+    profiles_dir: Path,
+    axis_points: np.ndarray,
+    axis_arclength: np.ndarray,
+    output_dir: Path,
+    base_stem: str,
+    binary: bool,
+    legacy: bool,
+) -> tuple[Path | None, int, int]:
+    """Read all *.csv in profiles_dir and write a single VTK with one
+    point-data array per (property, subject) pair, named '<property>_<subject>'.
+    The axis is trimmed to the overlap with the CSV arclength range.
+    Returns (output_path, n_properties, n_subjects); output_path is None
+    if no CSVs were found or the axis did not overlap any CSV."""
+    folder_prefix = profiles_dir.name + "_"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    csv_paths = sorted(profiles_dir.glob("*.csv"))
+    if not csv_paths:
+        return None, 0, 0
+
+    polydata: vtk.vtkPolyData | None = None
+    sub_arc: np.ndarray | None = None
+    n_subjects = 0
+
+    for csv_path in csv_paths:
+        csv_arc, subjects, values = read_profile_csv(csv_path)
+
+        stem = csv_path.stem
+        property_name = (
+            stem[len(folder_prefix):] if stem.startswith(folder_prefix) else stem
+        )
+
+        if polydata is None:
+            mask = (axis_arclength >= csv_arc.min()) & (
+                axis_arclength <= csv_arc.max()
+            )
+            if not mask.any():
+                print(
+                    f"No overlap between axis arclengths "
+                    f"[{axis_arclength.min()}, {axis_arclength.max()}] and "
+                    f"CSV range [{csv_arc.min()}, {csv_arc.max()}]; "
+                    "skipping profiles."
+                )
+                return None, 0, 0
+            sub_arc = axis_arclength[mask]
+            polydata = build_axis_polydata(axis_points[mask], sub_arc)
+            n_subjects = len(subjects)
+
+        for j, subject in enumerate(subjects):
+            sampled = np.interp(sub_arc, csv_arc, values[:, j]).astype(np.float32)
+            arr = numpy_to_vtk(sampled, deep=True)
+            arr.SetName(f"{property_name}_{subject}")
+            polydata.GetPointData().AddArray(arr)
+
+    out_path = output_dir / f"{base_stem}_profiles.vtk"
+    write_polydata(polydata, out_path, binary=binary, legacy=legacy)
+    return out_path, len(csv_paths), n_subjects
+
+
 def read_polydata(path: Path) -> vtk.vtkPolyData:
     reader = vtk.vtkPolyDataReader()
     reader.SetFileName(str(path))
@@ -253,6 +389,29 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--profiles-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Path to either a leaf profile subfolder (containing *.csv "
+            "directly, e.g. Profiles/AC_Olfactory) or the base Profiles folder "
+            "(in which case the matching leaf is auto-discovered from the "
+            "fiber filename: case-insensitive, L<->Left and R<->Right, "
+            "hemisphere indicator may appear in any position). Each *.csv is "
+            "interpolated onto the axis arclengths and written as a separate "
+            "VTK file with one point-data array per subject column."
+        ),
+    )
+    parser.add_argument(
+        "--profiles-output-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Directory for per-property profile VTKs. Defaults to the same "
+            "directory as the axis output file."
+        ),
+    )
+    parser.add_argument(
         "--binary",
         action="store_true",
         help="Write the output VTK file in binary format (default: ASCII).",
@@ -316,6 +475,30 @@ def main(argv: list[str] | None = None) -> int:
         f"(bin width {args.bin_width}, method {args.method}{suffix}) "
         f"to {output_path}"
     )
+
+    if args.profiles_dir is not None:
+        if not args.profiles_dir.is_dir():
+            raise SystemExit(f"Profiles dir not found: {args.profiles_dir}")
+        resolved = resolve_profiles_dir(args.profiles_dir, args.input.stem)
+        if resolved != args.profiles_dir:
+            print(f"Matched profile folder: {resolved}")
+        profiles_output_dir = args.profiles_output_dir or output_path.parent
+        profile_path, n_props, n_subjects = process_profiles(
+            resolved,
+            axis_coords,
+            axis_arclength,
+            profiles_output_dir,
+            output_path.stem,
+            binary=args.binary,
+            legacy=args.legacy,
+        )
+        if profile_path is not None:
+            print(
+                f"Wrote {n_props} properties x {n_subjects} subjects = "
+                f"{n_props * n_subjects} arrays to {profile_path}"
+            )
+        else:
+            print(f"No profile VTK written from {resolved}")
     return 0
 
 
