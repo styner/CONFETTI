@@ -1,0 +1,10 @@
+#!/bin/tcsh
+
+foreach i (./Fibers/*parametrized.vtk)
+	echo computing axis for fiber $i
+	python ./compute_fiber_axis.py $i --legacy --outlier-sigma 4.0 --clip-factor 3.0
+end
+
+if (! -e ./FiberAxis) mkdir ./FiberAxis
+mv ./Fibers/*_axis.vtk ./FiberAxis/
+
