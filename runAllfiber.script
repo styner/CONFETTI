@@ -21,3 +21,5 @@ if (! -e ./FiberAxisProfiles_merged.vtk) then
 	python ./merge_fibers.py ./FiberAxisProfiles
 endif
 
+echo impute missing values with INR
+python3 impute_missing_profiles.py FiberAxisProfiles_merged.vtk --epochs 200 --omega-0 10 
