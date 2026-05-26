@@ -2,7 +2,7 @@
 
 set nonomatch
 
-set doAlways = 1
+set doAlways = 0
 
 if (! -e ./FiberAxis) mkdir ./FiberAxis
 if (! -e ./FiberAxisProfiles) mkdir ./FiberAxisProfiles
@@ -35,6 +35,6 @@ endif
 
 if (! -e FiberAxisProfiles_merged_imputed_neighborhood.npz || $doAlways == 1) then
 	echo build neighborhood graph
-	python compute_neighborhoods.py FiberAxisProfiles_merged_imputed.vtk
+	python build_neighborhood_graph.py FiberAxisProfiles_merged_imputed.vtk
 endif
 

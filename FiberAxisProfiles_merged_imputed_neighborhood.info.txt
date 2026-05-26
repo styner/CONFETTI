@@ -1,0 +1,17 @@
+Input axis: FiberAxisProfiles_merged_imputed.vtk
+Input fibers: Fibers_merged.vtk
+Axis points: 4766
+Fiber points: 3766084
+Tracts: 66
+Arclength tolerance: 0.5
+Initial k for cross-tract query: 500
+Axis points without cross-tract neighbor: 3
+Median nearest cross-tract distance: 5.077781
+Threshold multiplier: 1.5
+Distance threshold: 7.616671
+Candidate pairs within threshold: 135775
+Edges after per-tract closest-only selection: 20660
+Sequential edges along axes (candidates): 4700
+Sequential edges not already retained: 873
+Unique undirected edges (union): 21533
+Average degree: 9.0361
