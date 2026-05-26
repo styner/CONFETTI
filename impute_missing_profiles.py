@@ -194,6 +194,37 @@ def replace_array(
     pdata.AddArray(new_arr)
 
 
+def build_mask_polydata(
+    source: vtk.vtkPolyData,
+    subject_masks: dict[str, np.ndarray],
+    context_arrays: tuple[str, ...] = ("FiberLabel", "SamplingDistance2Origin"),
+) -> vtk.vtkPolyData:
+    """Build a polydata sharing geometry with `source` but whose point data is
+    an int 0/1 ImputationMask_<subject> array for each imputed subject, plus
+    any named context arrays copied through if present."""
+    out = vtk.vtkPolyData()
+    out.SetPoints(source.GetPoints())
+    out.SetVerts(source.GetVerts())
+    out.SetLines(source.GetLines())
+    out.SetPolys(source.GetPolys())
+    out.SetStrips(source.GetStrips())
+
+    in_pdata = source.GetPointData()
+    out_pdata = out.GetPointData()
+    for ctx_name in context_arrays:
+        arr = in_pdata.GetArray(ctx_name)
+        if arr is not None:
+            out_pdata.AddArray(arr)
+
+    for subj, mask in subject_masks.items():
+        int_mask = mask.astype(np.int32)
+        vtk_arr = numpy_to_vtk(int_mask, deep=True, array_type=vtk.VTK_INT)
+        vtk_arr.SetName(f"ImputationMask_{subj}")
+        out_pdata.AddArray(vtk_arr)
+
+    return out
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -262,6 +293,24 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=None,
         help="Only impute the first N subjects (smoke-test).",
     )
+    parser.add_argument(
+        "--mask-output",
+        type=Path,
+        default=None,
+        help=(
+            "Path for the per-subject imputation-mask VTK. Defaults to "
+            "<input-stem>_imputation_mask.vtk next to the input. Each imputed "
+            "subject contributes an int point-data array 'ImputationMask_<subject>' "
+            "with 1 where the value was imputed and 0 where it was observed."
+        ),
+    )
+    parser.add_argument(
+        "--no-mask",
+        dest="write_mask",
+        action="store_false",
+        help="Skip writing the imputation-mask VTK.",
+    )
+    parser.set_defaults(write_mask=True)
     parser.add_argument(
         "--binary",
         action="store_true",
@@ -349,6 +398,7 @@ def main(argv: list[str] | None = None) -> int:
 
     n_imputed = 0
     losses: list[float] = []
+    subject_imputation_masks: dict[str, np.ndarray] = {}
     start_time = time.time()
 
     for idx, subj in enumerate(needs_imputation, start=1):
@@ -397,6 +447,8 @@ def main(argv: list[str] | None = None) -> int:
             arr[mask_miss] = preds_norm[:, j] * sd + mu
             replace_array(pdata, prop_to_name[prop], arr)
 
+        subject_imputation_masks[subj] = mask_miss.copy()
+
         n_imputed += 1
         if idx % 25 == 0 or idx == len(needs_imputation):
             elapsed = time.time() - start_time
@@ -422,6 +474,28 @@ def main(argv: list[str] | None = None) -> int:
     if args.legacy:
         writer.SetFileVersion(vtk.vtkPolyDataWriter.VTK_LEGACY_READER_VERSION_4_2)
     writer.Write()
+
+    if args.write_mask and subject_imputation_masks:
+        mask_path = args.mask_output or args.input.with_name(
+            f"{args.input.stem}_imputation_mask.vtk"
+        )
+        mask_polydata = build_mask_polydata(polydata, subject_imputation_masks)
+        mask_writer = vtk.vtkPolyDataWriter()
+        mask_writer.SetFileName(str(mask_path))
+        mask_writer.SetInputData(mask_polydata)
+        if args.binary:
+            mask_writer.SetFileTypeToBinary()
+        else:
+            mask_writer.SetFileTypeToASCII()
+        if args.legacy:
+            mask_writer.SetFileVersion(
+                vtk.vtkPolyDataWriter.VTK_LEGACY_READER_VERSION_4_2
+            )
+        mask_writer.Write()
+        print(
+            f"Imputation mask: {len(subject_imputation_masks)} subjects "
+            f"-> {mask_path}"
+        )
 
     print()
     print(
