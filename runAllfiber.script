@@ -6,6 +6,7 @@ set doAlways = 0
 
 if (! -e ./FiberAxis) mkdir ./FiberAxis
 if (! -e ./FiberAxisProfiles) mkdir ./FiberAxisProfiles
+if (! -e ./OutputMerged) mkdir ./OutputMerged
 
 foreach i (./Fibers/*parametrized.vtk)
 	if (! -e ./FiberAxis/$i:t:r_axis.vtk || $doAlways == 1) then
@@ -13,28 +14,28 @@ foreach i (./Fibers/*parametrized.vtk)
 		python ./compute_fiber_axis.py $i --legacy --outlier-sigma 4.0 --clip-factor 3.0 -o ./FiberAxis/$i:t:r_axis.vtk --profiles-dir ./Profiles/  --profiles-output-dir ./FiberAxisProfiles/
 	endif
 end
-if (! -e ./Fibers_merged.vtk || $doAlways == 1) then
+if (! -e ./OutputMerged/Fibers_merged.vtk || $doAlways == 1) then
 echo merging fibers
-	python ./merge_fibers.py ./Fibers
+	python ./merge_fibers.py ./Fibers -o ./OutputMerged/Fibers_merged.vtk
 endif
 
-if (! -e ./FiberAxis_merged.vtk || $doAlways == 1) then
+if (! -e ./OutputMerged/FiberAxis_merged.vtk || $doAlways == 1) then
 	echo merging fiber axes
-	python ./merge_fibers.py ./FiberAxis
+	python ./merge_fibers.py ./FiberAxis -o ./OutputMerged/FiberAxis_merged.vtk	
 endif
 
-if (! -e ./FiberAxisProfiles_merged.vtk || $doAlways == 1) then
+if (! -e ./OutputMerged/FiberAxisProfiles_merged.vtk || $doAlways == 1) then
 	echo merging fiber axis profiles
-	python ./merge_fibers.py ./FiberAxisProfiles
+	python ./merge_fibers.py ./FiberAxisProfiles -o ./OutputMerged/FiberAxisProfiles_merged.vtk
 endif
 
-if (! -e FiberAxisProfiles_merged_imputed.vtk || $doAlways == 1) then
+if (! -e ./OutputMerged/FiberAxisProfiles_merged_imputed.vtk || $doAlways == 1) then
 	echo impute missing values with INR
-	python impute_missing_profiles.py FiberAxisProfiles_merged.vtk --epochs 200 --omega-0 10 
+	python impute_missing_profiles.py ./OutputMerged/FiberAxisProfiles_merged.vtk --epochs 200 --omega-0 10 
 endif
 
-if (! -e FiberAxisProfiles_merged_imputed_neighborhood.npz || $doAlways == 1) then
+if (! -e ./OutputMerged/FiberAxisProfiles_merged_imputed_neighborhood_L5.vtk || $doAlways == 1) then
 	echo build neighborhood graph
-	python build_neighborhood_graph.py FiberAxisProfiles_merged_imputed.vtk
+	python build_neighborhood_graph.py ./OutputMerged/FiberAxisProfiles_merged_imputed.vtk --levels 6
 endif
 

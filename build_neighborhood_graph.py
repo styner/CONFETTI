@@ -25,7 +25,7 @@ import numpy as np
 import scipy.sparse as sp
 import vtk
 from scipy.spatial import cKDTree
-from vtk.util.numpy_support import vtk_to_numpy
+from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
 
 
 def read_arrays(
@@ -128,10 +128,158 @@ def collect_sequential_edges(polydata: vtk.vtkPolyData) -> np.ndarray:
     )
 
 
+def select_subsample_indices(
+    n_pts: int, step: int, min_pts: int = 3
+) -> list[int]:
+    """Pick local indices into a polyline of `n_pts` points subject to:
+      - Index 0 (first) is always included.
+      - Index n_pts - 1 (last) is always included when n_pts >= 2.
+      - Otherwise every `step`-th index from the start is kept.
+      - The result has at least `min_pts` indices when `n_pts >= min_pts`;
+        gaps are filled by inserting midpoints into the largest remaining gap.
+    """
+    if n_pts <= 0:
+        return []
+    if n_pts <= min_pts:
+        return list(range(n_pts))
+
+    kept = list(range(0, n_pts, step))
+    if kept[-1] != n_pts - 1:
+        kept.append(n_pts - 1)
+
+    while len(kept) < min_pts:
+        max_gap = 0
+        max_idx = -1
+        for i in range(len(kept) - 1):
+            gap = kept[i + 1] - kept[i]
+            if gap > max_gap:
+                max_gap = gap
+                max_idx = i
+        if max_gap <= 1:
+            break
+        mid = (kept[max_idx] + kept[max_idx + 1]) // 2
+        kept.insert(max_idx + 1, mid)
+    return kept
+
+
+def subsample_polydata(
+    source: vtk.vtkPolyData, level: int, min_pts: int = 3
+) -> tuple[vtk.vtkPolyData, np.ndarray, np.ndarray]:
+    """For each polyline cell of `source`, keep every (2**level)-th point.
+
+    Returns:
+      new_polydata: vtkPolyData with just the kept points and one polyline
+        cell per source cell (when >=2 points remain). All source point-data
+        arrays are subsetted to the kept points.
+      kept_orig: 1D int array of original point IDs in the order matching the
+        new point indexing (new_index -> original_id).
+      sequential_pairs: (M, 2) int pairs (a, b) with a < b in NEW indexing,
+        for consecutive points within each cell's kept subset.
+    """
+    if level < 0:
+        raise ValueError(f"level must be >= 0 (got {level})")
+    step = 1 << level
+
+    new_points = vtk.vtkPoints()
+    new_lines = vtk.vtkCellArray()
+    kept_orig: list[int] = []
+    seq_local: list[tuple[int, int]] = []
+    cell_tract_labels: list[int] = []
+    src_points = source.GetPoints()
+    src_fiber_label = source.GetPointData().GetArray("FiberLabel")
+    src_labels_np = (
+        vtk_to_numpy(src_fiber_label) if src_fiber_label is not None else None
+    )
+
+    for c in range(source.GetNumberOfCells()):
+        cell = source.GetCell(c)
+        n_pts = cell.GetNumberOfPoints()
+        ids = [cell.GetPointId(k) for k in range(n_pts)]
+        local_keep = select_subsample_indices(n_pts, step, min_pts=min_pts)
+        sub_ids = [ids[k] for k in local_keep]
+        if not sub_ids:
+            continue
+
+        offset = len(kept_orig)
+        for oid in sub_ids:
+            new_points.InsertNextPoint(src_points.GetPoint(oid))
+            kept_orig.append(oid)
+
+        if len(sub_ids) >= 2:
+            polyline = vtk.vtkPolyLine()
+            polyline.GetPointIds().SetNumberOfIds(len(sub_ids))
+            for i in range(len(sub_ids)):
+                polyline.GetPointIds().SetId(i, offset + i)
+            new_lines.InsertNextCell(polyline)
+            for i in range(1, len(sub_ids)):
+                seq_local.append((offset + i - 1, offset + i))
+            cell_tract_labels.append(
+                int(src_labels_np[sub_ids[0]]) if src_labels_np is not None else c
+            )
+
+    kept_orig_arr = np.asarray(kept_orig, dtype=np.int64)
+    seq = (
+        np.asarray(seq_local, dtype=np.int64)
+        if seq_local
+        else np.zeros((0, 2), dtype=np.int64)
+    )
+
+    new_pd = vtk.vtkPolyData()
+    new_pd.SetPoints(new_points)
+    new_pd.SetLines(new_lines)
+
+    if cell_tract_labels:
+        cell_label_arr = numpy_to_vtk(
+            np.asarray(cell_tract_labels, dtype=np.int32),
+            deep=True,
+            array_type=vtk.VTK_INT,
+        )
+        cell_label_arr.SetName("FiberLabel")
+        new_pd.GetCellData().AddArray(cell_label_arr)
+        new_pd.GetCellData().SetActiveScalars("FiberLabel")
+
+    src_pdata = source.GetPointData()
+    new_pdata = new_pd.GetPointData()
+    for i in range(src_pdata.GetNumberOfArrays()):
+        src_arr = src_pdata.GetArray(i)
+        if src_arr is None:
+            continue
+        name = src_arr.GetName()
+        if not name:
+            continue
+        np_arr = vtk_to_numpy(src_arr)
+        if np_arr.ndim == 1:
+            sub_np = np_arr[kept_orig_arr]
+        else:
+            sub_np = np_arr[kept_orig_arr, :]
+        new_vtk_arr = numpy_to_vtk(
+            sub_np, deep=True, array_type=src_arr.GetDataType()
+        )
+        new_vtk_arr.SetName(name)
+        new_pdata.AddArray(new_vtk_arr)
+
+    return new_pd, kept_orig_arr, seq
+
+
+def write_polydata(
+    polydata: vtk.vtkPolyData, path: Path, binary: bool, legacy: bool
+) -> None:
+    writer = vtk.vtkPolyDataWriter()
+    writer.SetFileName(str(path))
+    writer.SetInputData(polydata)
+    if binary:
+        writer.SetFileTypeToBinary()
+    else:
+        writer.SetFileTypeToASCII()
+    if legacy:
+        writer.SetFileVersion(vtk.vtkPolyDataWriter.VTK_LEGACY_READER_VERSION_4_2)
+    writer.Write()
+
+
 def build_adjacency(
     axis_points: np.ndarray,
     axis_labels: np.ndarray,
-    polydata: vtk.vtkPolyData,
+    sequential_pairs: np.ndarray,
     threshold: float,
 ) -> tuple[sp.csr_matrix, dict[str, int]]:
     n = axis_points.shape[0]
@@ -162,7 +310,6 @@ def build_adjacency(
         target_tracts = axis_labels[js]
         deltas = axis_points[js] - axis_points[i]
         d2 = np.einsum("ij,ij->i", deltas, deltas)
-        # For each target tract, pick the j with the smallest distance.
         order = np.argsort(d2, kind="stable")
         sorted_js = js[order]
         sorted_tracts = target_tracts[order]
@@ -178,11 +325,12 @@ def build_adjacency(
         f"in {time.time() - t0:.2f}s"
     )
 
-    seq_pairs = collect_sequential_edges(polydata)
-    seq_set = set(map(tuple, seq_pairs)) if seq_pairs.size else set()
+    seq_set = (
+        set(map(tuple, sequential_pairs)) if sequential_pairs.size else set()
+    )
     extra_seq = seq_set - selected
     print(
-        f"  {seq_pairs.shape[0]:,} sequential edges along polylines "
+        f"  {sequential_pairs.shape[0]:,} sequential edges along polylines "
         f"({len(extra_seq):,} not already retained)"
     )
 
@@ -202,7 +350,7 @@ def build_adjacency(
     stats = {
         "candidate_pairs": int(n_candidate_pairs),
         "selected_edges": int(len(selected)),
-        "sequential_edges": int(seq_pairs.shape[0]),
+        "sequential_edges": int(sequential_pairs.shape[0]),
         "sequential_extra": int(len(extra_seq)),
         "unique_edges": int(all_pairs.shape[0]),
     }
@@ -271,9 +419,50 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=Path,
         default=None,
         help=(
-            "Output dense adjacency text matrix path. Defaults to the "
-            ".npz path with a .txt extension. Each row is space-separated "
-            "0/1 values written via numpy.savetxt."
+            "Output dense adjacency text matrix path (only used when --levels=1). "
+            "Defaults to the .npz path with a .txt extension. Each row is "
+            "space-separated 0/1 values written via numpy.savetxt."
+        ),
+    )
+    parser.add_argument(
+        "--levels",
+        type=int,
+        default=1,
+        help=(
+            "Number of resolution levels to generate (default: 1 = single "
+            "graph, no suffix). For levels > 1, level L keeps every (2**L)-th "
+            "point along each axis polyline, and each level's outputs get a "
+            "_L<n> suffix."
+        ),
+    )
+    parser.add_argument(
+        "--min-points-per-fiber",
+        type=int,
+        default=3,
+        help=(
+            "Minimum number of points to keep on each fiber axis at every "
+            "resolution level (default: 3). The first and last point of each "
+            "fiber are always retained; midpoints are added as needed."
+        ),
+    )
+    parser.add_argument(
+        "--no-vtk",
+        dest="write_vtk",
+        action="store_false",
+        help="Skip writing the per-level fiber-axis VTK file.",
+    )
+    parser.set_defaults(write_vtk=True)
+    parser.add_argument(
+        "--vtk-binary",
+        action="store_true",
+        help="Write per-level VTK in binary format (default: ASCII).",
+    )
+    parser.add_argument(
+        "--vtk-legacy",
+        action="store_true",
+        help=(
+            "Write per-level VTK using legacy file format version 4.2 "
+            "instead of the default 5.1."
         ),
     )
     parser.add_argument(
@@ -299,7 +488,6 @@ def main(argv: list[str] | None = None) -> int:
     out_npz = args.output or args.axis.with_name(
         f"{args.axis.stem}_neighborhood.npz"
     )
-    info_path = out_npz.with_suffix(".info.txt")
 
     print(f"Axis: {args.axis}")
     axis_pd, axis_pts, axis_lbl, axis_arc = read_arrays(
@@ -320,7 +508,10 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(np.unique(fb_lbl))} tracts"
     )
 
-    nearest = cross_tract_nearest_distances(
+    if args.levels < 1:
+        raise SystemExit(f"--levels must be >= 1 (got {args.levels})")
+
+    nearest_full = cross_tract_nearest_distances(
         axis_pts,
         axis_lbl,
         axis_arc,
@@ -330,70 +521,115 @@ def main(argv: list[str] | None = None) -> int:
         arc_tolerance=args.arc_tolerance,
         k_start=args.k_neighbors,
     )
-
-    finite = nearest[np.isfinite(nearest)]
-    n_failed = int(np.isinf(nearest).sum())
-    if not finite.size:
-        raise SystemExit("All axis points failed the cross-tract distance query.")
-
-    median_nd = float(np.median(finite))
-    threshold = args.threshold_multiplier * median_nd
-    print()
-    print(
-        f"Nearest cross-tract distance over {finite.size:,} axis points "
-        f"({n_failed} missing):"
-    )
-    print(
-        f"  min={finite.min():.3f}  p10={np.quantile(finite, 0.1):.3f}  "
-        f"median={median_nd:.3f}  p90={np.quantile(finite, 0.9):.3f}  "
-        f"max={finite.max():.3f}"
-    )
-    print(
-        f"Distance threshold = {args.threshold_multiplier} × median "
-        f"= {threshold:.3f} mm"
-    )
     print()
 
-    adj, stats = build_adjacency(axis_pts, axis_lbl, axis_pd, threshold)
-    avg_deg = adj.nnz / adj.shape[0] if adj.shape[0] else 0
-    print(
-        f"Adjacency: {adj.shape[0]} nodes, "
-        f"{adj.nnz:,} non-zeros, "
-        f"{stats['unique_edges']:,} unique undirected edges, "
-        f"average degree {avg_deg:.1f}"
-    )
-
-    sp.save_npz(out_npz, adj)
-    print(f"Saved sparse adjacency: {out_npz}")
-
-    text_path = args.text_output or out_npz.with_suffix(".txt")
-    np.savetxt(text_path, adj.toarray().astype(np.int8), fmt="%d")
-    print(f"Saved dense text adjacency: {text_path}")
-
-    with info_path.open("w") as f:
-        f.write(f"Input axis: {args.axis}\n")
-        f.write(f"Input fibers: {args.fibers}\n")
-        f.write(f"Axis points: {len(axis_pts)}\n")
-        f.write(f"Fiber points: {len(fb_pts)}\n")
-        f.write(f"Tracts: {len(np.unique(axis_lbl))}\n")
-        f.write(f"Arclength tolerance: {args.arc_tolerance}\n")
-        f.write(f"Initial k for cross-tract query: {args.k_neighbors}\n")
-        f.write(f"Axis points without cross-tract neighbor: {n_failed}\n")
-        f.write(f"Median nearest cross-tract distance: {median_nd:.6f}\n")
-        f.write(f"Threshold multiplier: {args.threshold_multiplier}\n")
-        f.write(f"Distance threshold: {threshold:.6f}\n")
-        f.write(f"Candidate pairs within threshold: {stats['candidate_pairs']}\n")
-        f.write(
-            f"Edges after per-tract closest-only selection: "
-            f"{stats['selected_edges']}\n"
+    for level in range(args.levels):
+        suffix = f"_L{level}" if args.levels > 1 else ""
+        level_npz = out_npz.with_name(f"{out_npz.stem}{suffix}{out_npz.suffix}")
+        level_info = level_npz.with_suffix(".info.txt")
+        level_txt = (
+            args.text_output
+            if args.levels == 1 and args.text_output is not None
+            else level_npz.with_suffix(".txt")
         )
-        f.write(f"Sequential edges along axes (candidates): {stats['sequential_edges']}\n")
-        f.write(
-            f"Sequential edges not already retained: {stats['sequential_extra']}\n"
+        level_indices = level_npz.with_suffix(".indices.txt")
+
+        print("=" * 64)
+        print(f"Level {level} (step = {1 << level})")
+        print("=" * 64)
+
+        sub_polydata, kept_orig, seq_pairs_new = subsample_polydata(
+            axis_pd, level, min_pts=args.min_points_per_fiber
         )
-        f.write(f"Unique undirected edges (union): {stats['unique_edges']}\n")
-        f.write(f"Average degree: {avg_deg:.4f}\n")
-    print(f"Summary: {info_path}")
+        sub_pts = axis_pts[kept_orig]
+        sub_lbl = axis_lbl[kept_orig]
+        sub_arc = axis_arc[kept_orig]
+        sub_nearest = nearest_full[kept_orig]
+        finite = sub_nearest[np.isfinite(sub_nearest)]
+        n_failed = int(np.isinf(sub_nearest).sum())
+        if not finite.size:
+            print(f"Level {level}: no finite cross-tract distances; skipping.")
+            continue
+        median_nd = float(np.median(finite))
+        threshold = args.threshold_multiplier * median_nd
+        print(
+            f"  axis points: {sub_pts.shape[0]:,} "
+            f"(from {axis_pts.shape[0]:,} at L0)"
+        )
+        print(
+            f"  nearest cross-tract: median={median_nd:.3f}, "
+            f"p10={np.quantile(finite, 0.1):.3f}, "
+            f"p90={np.quantile(finite, 0.9):.3f}  ({n_failed} missing)"
+        )
+        print(
+            f"  threshold = {args.threshold_multiplier} × median "
+            f"= {threshold:.3f} mm"
+        )
+
+        adj, stats = build_adjacency(sub_pts, sub_lbl, seq_pairs_new, threshold)
+        avg_deg = adj.nnz / adj.shape[0] if adj.shape[0] else 0
+        print(
+            f"  adjacency: {adj.shape[0]} nodes, "
+            f"{adj.nnz:,} non-zeros, "
+            f"{stats['unique_edges']:,} unique undirected edges, "
+            f"average degree {avg_deg:.1f}"
+        )
+
+        sp.save_npz(level_npz, adj)
+        np.savetxt(level_txt, adj.toarray().astype(np.int8), fmt="%d")
+        np.savetxt(level_indices, kept_orig, fmt="%d")
+
+        if args.write_vtk:
+            degrees = np.asarray(adj.sum(axis=1)).flatten().astype(np.int32)
+            deg_arr = numpy_to_vtk(
+                degrees, deep=True, array_type=vtk.VTK_INT
+            )
+            deg_arr.SetName("NumNeighbors")
+            sub_polydata.GetPointData().AddArray(deg_arr)
+            sub_polydata.GetPointData().SetActiveScalars("NumNeighbors")
+
+            level_vtk = level_npz.with_suffix(".vtk")
+            write_polydata(
+                sub_polydata,
+                level_vtk,
+                binary=args.vtk_binary,
+                legacy=args.vtk_legacy,
+            )
+        with level_info.open("w") as f:
+            f.write(f"Input axis: {args.axis}\n")
+            f.write(f"Input fibers: {args.fibers}\n")
+            f.write(f"Resolution level: {level} (step = {1 << level})\n")
+            f.write(f"Axis points at this level: {sub_pts.shape[0]}\n")
+            f.write(f"Axis points at L0: {axis_pts.shape[0]}\n")
+            f.write(f"Tracts: {len(np.unique(axis_lbl))}\n")
+            f.write(f"Arclength tolerance: {args.arc_tolerance}\n")
+            f.write(f"Initial k for cross-tract query: {args.k_neighbors}\n")
+            f.write(f"Axis points without cross-tract neighbor: {n_failed}\n")
+            f.write(f"Median nearest cross-tract distance: {median_nd:.6f}\n")
+            f.write(f"Threshold multiplier: {args.threshold_multiplier}\n")
+            f.write(f"Distance threshold: {threshold:.6f}\n")
+            f.write(f"Candidate pairs within threshold: {stats['candidate_pairs']}\n")
+            f.write(
+                f"Edges after per-tract closest-only selection: "
+                f"{stats['selected_edges']}\n"
+            )
+            f.write(
+                f"Sequential edges along axes (candidates): "
+                f"{stats['sequential_edges']}\n"
+            )
+            f.write(
+                f"Sequential edges not already retained: "
+                f"{stats['sequential_extra']}\n"
+            )
+            f.write(f"Unique undirected edges (union): {stats['unique_edges']}\n")
+            f.write(f"Average degree: {avg_deg:.4f}\n")
+        print(f"  saved: {level_npz}")
+        print(f"         {level_txt}")
+        print(f"         {level_indices}")
+        print(f"         {level_info}")
+        if args.write_vtk:
+            print(f"         {level_vtk}")
+        print()
     return 0
 
 
