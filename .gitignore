@@ -1,9 +1,6 @@
 FiberAxisProfiles
-FiberAxisProfiles_merged.csv 
-FiberAxisProfiles_merged.vtk 
-FiberAxisProfiles_merged_imputation_mask.vtk 
-FiberAxisProfiles_merged_imputed.vtk 
 demo_mergeVisits.csv
 Profiles
-Fibers_merged.vtk
-Fibers_merged.csv
+.claude
+__pycache__
+OutputMerged
