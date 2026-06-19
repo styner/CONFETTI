@@ -236,16 +236,22 @@ def load_v06_subjects(
     vineland_short: tuple[str, ...] = VINELAND_SHORT_NAMES,
     covariate_columns: tuple[str, ...] = COVARIATE_CSV_COLUMNS,
     covariate_names: tuple[str, ...] = COVARIATE_NAMES,
+    extra_target_columns: tuple[str, ...] = (),
+    extra_target_short_names: tuple[str, ...] = (),
 ) -> pd.DataFrame:
     """Load V06 row, parse subject id, cohort label, Vineland scores, and the
     head-concatenated covariates.
 
     Returns a DataFrame indexed by 'subject_id' ('<CandID>_V06') with columns:
-      cohort        -- original string label
-      label         -- 0/1 (Control/DS) per COHORT_TO_LABEL; NaN if unrecognized
-      <vineland_*>  -- one column per Vineland subscale (NaN if missing)
-      cov_<name>    -- one column per covariate; sex is recoded F=0/M=1; the
-                       other covariates are float, NaN where missing in the CSV
+      cohort           -- original string label
+      label            -- 0/1 (Control/DS) per COHORT_TO_LABEL; NaN if unrecognized
+      vineland_<short> -- one column per V06 Vineland subscale (NaN if missing)
+      target_<short>   -- one column per extra regression target (typically the
+                          V24 Vineland + Bayley-4 outcomes for prospective
+                          regression); the short names need to be unique across
+                          target families. Numeric, NaN where missing.
+      cov_<name>       -- one column per covariate; sex is recoded F=0/M=1; the
+                          other covariates are float, NaN where missing.
     """
     cohort_map = cohort_map or COHORT_TO_LABEL
     df = pd.read_csv(csv_path)
@@ -259,6 +265,13 @@ def load_v06_subjects(
     for short, full in zip(vineland_short, vineland_columns):
         col = pd.to_numeric(df[full], errors="coerce")
         out[f"vineland_{short}"] = col.values
+    if len(extra_target_columns) != len(extra_target_short_names):
+        raise ValueError(
+            "extra_target_columns and extra_target_short_names must be the same length"
+        )
+    for short, full in zip(extra_target_short_names, extra_target_columns):
+        col = pd.to_numeric(df[full], errors="coerce")
+        out[f"target_{short}"] = col.values
 
     # Covariates. Sex is categorical -> numeric via SEX_MAP; the others are
     # parsed as floats; non-numeric / empty cells become NaN and are

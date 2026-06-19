@@ -827,6 +827,175 @@ def _perm_imp_per_fold(
             perm_results["node"].setdefault(int(k), []).append(float(v))
 
 
+def _perm_imp_regression_per_fold(
+    *,
+    levels: dict[int, LevelData],
+    pool_maps_by_level: dict[tuple[int, int], np.ndarray],
+    test_ids: list[str],
+    imputed_per_level: dict[int, dict[str, dict[str, np.ndarray]]],
+    info: dict,
+    train_cfg: TrainConfig,
+    model_name: str,
+    properties: tuple[str, ...],
+    target_names: tuple[str, ...],
+    y_te: np.ndarray,
+    cov_te: np.ndarray | None,
+    perm_results: dict[str, dict[str, dict[object, list[float]]]],
+    n_tract_repeats: int,
+    n_node_repeats: int,
+    n_cov_repeats: int,
+    skip_node_perm: bool,
+    seed: int,
+    covariate_names: tuple[str, ...] | None,
+) -> None:
+    """Per-target OOF permutation importance for regression.
+
+    For each granularity (tract / node / covariate) and each output target,
+    importance = MAE_permuted - MAE_baseline on the held-out test fold.
+    Higher = more important (the model's MAE got worse when the feature was
+    shuffled across subjects).
+
+    Appends per-(target, granularity, gid) per-fold values to `perm_results`.
+    Storage layout:
+      perm_results[granularity][target_name][gid] -> list[per-fold MAE drop]
+    """
+    from .interpret import _predict
+    from .models import build_model
+
+    if len(y_te) == 0:
+        return
+
+    device = train_cfg.select_device()
+    sorted_levels = sorted(levels.keys())
+    used_levels = (
+        [sorted_levels[-1]]
+        if model_name.lower() in ("gcn", "single", "single_level_gcn")
+        else sorted_levels
+    )
+    in_dim = len(properties) + 4
+    n_lv = 1 if len(used_levels) == 1 else len(used_levels)
+    n_covariates = 0 if cov_te is None else int(cov_te.shape[1])
+    model = build_model(
+        model_name,
+        in_dim=in_dim,
+        n_levels=n_lv,
+        out_dim=len(target_names),
+        hidden_dim=train_cfg.hidden_dim,
+        dropout=train_cfg.dropout,
+        use_batchnorm=train_cfg.use_batchnorm,
+        n_covariates=n_covariates,
+    ).to(device)
+    model.load_state_dict(info["model_state"])
+    model.eval()
+
+    feats_test, _, _ = _build_inputs(
+        levels, test_ids, imputed_per_level, properties
+    )
+    _apply_property_stats(feats_test, info["prop_stats"], properties)
+    feats_used = {L: feats_test[L] for L in used_levels}
+    sorted_used = sorted(used_levels)
+    pool_maps_list = (
+        [pool_maps_by_level[(L, Lp1)] for L, Lp1 in zip(sorted_used[:-1], sorted_used[1:])]
+        if len(used_levels) > 1 and model_name.lower() in ("unet", "graph_unet", "hierarchical")
+        else []
+    )
+    is_unet = model_name.lower() in ("unet", "graph_unet", "hierarchical")
+
+    y_mu = info.get("y_mu")
+    y_sd = info.get("y_sd")
+
+    def predict_denorm(feats, cov):
+        raw = _predict(model, feats, levels, used_levels, pool_maps_list,
+                       is_unet, device, covariates=cov)
+        if y_mu is not None and y_sd is not None:
+            return raw * y_sd + y_mu
+        return raw
+
+    def maes_per_target(preds):
+        out = {}
+        for t_idx, tname in enumerate(target_names):
+            mask = ~np.isnan(y_te[:, t_idx])
+            if mask.sum() < 3:
+                out[tname] = float("nan")
+            else:
+                out[tname] = float(np.mean(np.abs(preds[mask, t_idx] - y_te[mask, t_idx])))
+        return out
+
+    base_preds = predict_denorm(feats_used, cov_te)
+    base_maes = maes_per_target(base_preds)
+
+    rng = np.random.default_rng(seed)
+    L_primary = used_levels[0]
+    fiber_label = levels[L_primary].fiber_label
+    n_prop = len(properties)
+
+    def collect(granularity: str, gid, drops_per_target: dict[str, list[float]]) -> None:
+        for tname, vals in drops_per_target.items():
+            if not vals:
+                continue
+            perm_results.setdefault(granularity, {}) \
+                       .setdefault(tname, {}) \
+                       .setdefault(gid, []).append(float(np.mean(vals)))
+
+    # Tract granularity
+    for t in np.unique(fiber_label):
+        node_idx = np.where(fiber_label == t)[0]
+        drops = {tn: [] for tn in target_names}
+        for _ in range(n_tract_repeats):
+            shuffled = {L: feats_used[L].copy() for L in used_levels}
+            x = shuffled[L_primary]
+            S = x.shape[0]
+            perm = rng.permutation(S)
+            x[:, node_idx, :n_prop] = x[perm][:, node_idx, :n_prop]
+            shuffled[L_primary] = x
+            preds = predict_denorm(shuffled, cov_te)
+            maes = maes_per_target(preds)
+            for tn in target_names:
+                if not (np.isnan(base_maes[tn]) or np.isnan(maes[tn])):
+                    drops[tn].append(maes[tn] - base_maes[tn])
+        collect("tract", int(t), drops)
+
+    # Covariate granularity
+    if cov_te is not None and covariate_names is not None:
+        for c_idx, name in enumerate(covariate_names):
+            drops = {tn: [] for tn in target_names}
+            for _ in range(n_cov_repeats):
+                cov_shuf = cov_te.copy()
+                perm = rng.permutation(cov_shuf.shape[0])
+                cov_shuf[:, c_idx] = cov_te[perm, c_idx]
+                preds = predict_denorm(feats_used, cov_shuf)
+                maes = maes_per_target(preds)
+                for tn in target_names:
+                    if not (np.isnan(base_maes[tn]) or np.isnan(maes[tn])):
+                        drops[tn].append(maes[tn] - base_maes[tn])
+            collect("covariate", str(name), drops)
+
+    # Node granularity (most expensive)
+    if not skip_node_perm:
+        iter_count = 0
+        for n_id in range(fiber_label.shape[0]):
+            drops = {tn: [] for tn in target_names}
+            for _ in range(n_node_repeats):
+                shuffled = {L: feats_used[L].copy() for L in used_levels}
+                x = shuffled[L_primary]
+                S = x.shape[0]
+                perm = rng.permutation(S)
+                x[:, n_id, :n_prop] = x[perm][:, n_id, :n_prop]
+                shuffled[L_primary] = x
+                preds = predict_denorm(shuffled, cov_te)
+                maes = maes_per_target(preds)
+                for tn in target_names:
+                    if not (np.isnan(base_maes[tn]) or np.isnan(maes[tn])):
+                        drops[tn].append(maes[tn] - base_maes[tn])
+            collect("node", int(n_id), drops)
+            iter_count += 1
+            if iter_count % 64 == 0:
+                if device.type == "mps":
+                    torch.mps.empty_cache()
+                elif device.type == "cuda":
+                    torch.cuda.empty_cache()
+
+
 def _explain_ds_in_fold(
     *,
     ds_oof: list[tuple[int, str]],
@@ -1180,17 +1349,32 @@ def nested_cv_regression(
     properties: tuple[str, ...] = PROPERTIES,
     curves_dir: "Path | None" = None,
     covariates: np.ndarray | None = None,
-) -> pd.DataFrame:
-    """Run nested CV for multi-output regression (Vineland).
+    covariate_names: tuple[str, ...] | None = None,
+    perm_imp_oof: bool = False,
+    perm_imp_skip_node: bool = False,
+    perm_imp_tract_repeats: int = 3,
+    perm_imp_node_repeats: int = 2,
+    perm_imp_cov_repeats: int = 5,
+) -> tuple[pd.DataFrame, dict]:
+    """Run nested CV for multi-output regression (Vineland + Bayley-4).
 
     y has shape (N, K) with NaN for missing entries. Metrics per (repeat, fold,
     method, target): Pearson r, Spearman r, MAE.
+
+    Returns:
+      (metrics_df, perm_imp_oof_summary)
+        metrics_df: tidy per-fold per-method per-target metrics
+        perm_imp_oof_summary: dict[granularity][target_name][gid] -> {mean,std,n_folds}
+          Empty if `perm_imp_oof` is False.
     """
     siren_cfg = siren_cfg or {}
     train_cfg = train_cfg or TrainConfig()
     rows = []
     train_loss_history: list[list[float]] = []
     val_metric_history: list[list[float]] = []
+    perm_results_per_fold: dict[str, dict[str, dict[object, list[float]]]] = {
+        "tract": {}, "node": {}, "covariate": {},
+    }
     knn_cached = None
     if imputation == "knn":
         L0 = min(levels)
@@ -1307,6 +1491,28 @@ def nested_cv_regression(
                     val_label="validation -MAE (higher better)",
                 )
 
+            if perm_imp_oof:
+                _perm_imp_regression_per_fold(
+                    levels=levels,
+                    pool_maps_by_level=pool_maps_by_level,
+                    test_ids=test_ids,
+                    imputed_per_level=imputed_per_level,
+                    info=info,
+                    train_cfg=train_cfg,
+                    model_name=model_name,
+                    properties=properties,
+                    target_names=target_names,
+                    y_te=y_te,
+                    cov_te=cov_te,
+                    perm_results=perm_results_per_fold,
+                    n_tract_repeats=perm_imp_tract_repeats,
+                    n_node_repeats=perm_imp_node_repeats,
+                    n_cov_repeats=perm_imp_cov_repeats,
+                    skip_node_perm=perm_imp_skip_node,
+                    seed=seed + rep * 1000 + fold_idx,
+                    covariate_names=covariate_names,
+                )
+
     if curves_dir is not None and train_loss_history:
         _save_summary_curves(
             train_loss_history,
@@ -1319,4 +1525,21 @@ def nested_cv_regression(
             val_label="validation -MAE (higher better)",
         )
 
-    return pd.DataFrame(rows)
+    # Aggregate per-fold per-target perm-importance into mean/std/n_folds
+    perm_imp_oof_summary: dict[str, dict] = {}
+    for granularity, target_dict in perm_results_per_fold.items():
+        if not target_dict:
+            continue
+        perm_imp_oof_summary[granularity] = {}
+        for tname, gid_to_values in target_dict.items():
+            perm_imp_oof_summary[granularity][tname] = {
+                gid: {
+                    "mean": float(np.mean(vals)),
+                    "std": float(np.std(vals)),
+                    "n_folds": len(vals),
+                    "per_fold": list(vals),
+                }
+                for gid, vals in gid_to_values.items()
+            }
+
+    return pd.DataFrame(rows), perm_imp_oof_summary

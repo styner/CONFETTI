@@ -41,7 +41,8 @@ COVARIATE_NAMES: tuple[str, ...] = ("sex", "gestational_age", "num_DWI_artifact"
 N_COVARIATES = len(COVARIATE_NAMES)
 SEX_MAP: dict[str, float] = {"Female": 0.0, "Male": 1.0}
 
-# Vineland V06 standard-score columns used as multi-output regression targets.
+# Vineland V06 standard-score columns (concurrent regression target -- the
+# original task; also kept as one of the selectable target families).
 VINELAND_COLUMNS_V06: tuple[str, ...] = (
     "V06 Vineland,adapt_behave_comp_STD_SCORE",
     "V06 Vineland,communication_STD_SCORE",
@@ -52,6 +53,42 @@ VINELAND_COLUMNS_V06: tuple[str, ...] = (
 VINELAND_SHORT_NAMES: tuple[str, ...] = (
     "ABC", "Communication", "DailyLiving", "Motor", "Socialization",
 )
+
+# Vineland V24 standard-score columns (prospective regression target;
+# V06 imaging -> V24 outcomes is the primary prospective design).
+VINELAND_COLUMNS_V24: tuple[str, ...] = (
+    "V24 Vineland,adapt_behave_comp_STD_SCORE",
+    "V24 Vineland,communication_STD_SCORE",
+    "V24 Vineland,daily_living_skills_STD_SCORE",
+    "V24 Vineland,motor_skills_STD_SCORE",
+    "V24 Vineland,socialization_STD_SCORE",
+)
+VINELAND_SHORT_NAMES_V24: tuple[str, ...] = (
+    "V24_ABC", "V24_Comm", "V24_DailyLiving", "V24_Motor", "V24_Soc",
+)
+
+# Bayley-4 V24 scores (3 columns: cognitive standard + expressive/receptive
+# communication scaled scores).
+BAYLEY_COLUMNS_V24: tuple[str, ...] = (
+    "V24 Bayley4,COG_Standard_score",
+    "V24 Bayley4,Expressive_Communication_EC_Scaled_Score",
+    "V24 Bayley4,Receptive_Communication_RC_Scaled_Score",
+)
+BAYLEY_SHORT_NAMES_V24: tuple[str, ...] = (
+    "V24_BayleyCOG", "V24_BayleyEC", "V24_BayleyRC",
+)
+
+# Combined V24 outcomes (5 Vineland + 3 Bayley = 8-output multi-target).
+V24_OUTCOME_COLUMNS: tuple[str, ...] = VINELAND_COLUMNS_V24 + BAYLEY_COLUMNS_V24
+V24_OUTCOME_SHORT_NAMES: tuple[str, ...] = VINELAND_SHORT_NAMES_V24 + BAYLEY_SHORT_NAMES_V24
+
+# Convenience lookup for CLI --target-family
+TARGET_FAMILIES: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "v06_vineland": (VINELAND_COLUMNS_V06, VINELAND_SHORT_NAMES),
+    "v24_vineland": (VINELAND_COLUMNS_V24, VINELAND_SHORT_NAMES_V24),
+    "v24_bayley":   (BAYLEY_COLUMNS_V24, BAYLEY_SHORT_NAMES_V24),
+    "v24_all":      (V24_OUTCOME_COLUMNS, V24_OUTCOME_SHORT_NAMES),
+}
 
 # Default file conventions used by the level VTK output of
 # build_neighborhood_graph.py.
