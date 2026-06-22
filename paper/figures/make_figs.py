@@ -221,29 +221,124 @@ def fig_acolf_validation():
 
 
 def fig_pipeline():
-    fig, ax = plt.subplots(figsize=(7.5, 2.2))
-    ax.axis("off")
-    boxes = [
-        (0.02, 0.5, 0.12, "Per-tract\nfibers"),
-        (0.18, 0.5, 0.12, "Fiber-axis\ncomputation"),
-        (0.34, 0.5, 0.13, "Multi-res.\nneighborhood\ngraph (L0..L6)"),
-        (0.51, 0.5, 0.10, "SIREN\nimputation"),
-        (0.65, 0.5, 0.13, "Per-subject\nnode features\n(5 DTI + 4 spatial)"),
-        (0.82, 0.5, 0.15, "Graph U-Net\n+ covariates\n$\\rightarrow$ DS / V24"),
-    ]
-    for x, y, w, txt in boxes:
-        ax.add_patch(plt.Rectangle((x, y - 0.15), w, 0.3, fill=True,
-                                    facecolor="#dde6f0", edgecolor="#1f4e79"))
-        ax.text(x + w / 2, y, txt, ha="center", va="center", fontsize=8)
-    # arrows
-    for i in range(len(boxes) - 1):
-        x_start = boxes[i][0] + boxes[i][2]
-        x_end = boxes[i + 1][0]
-        ax.annotate(
-            "", xy=(x_end, 0.5), xytext=(x_start, 0.5),
-            arrowprops=dict(arrowstyle="->", lw=0.8, color="#1f4e79"),
-        )
+    """CONFETI method schematic: 5-stage horizontal pipeline with small
+    in-panel illustrations. Saved as fig_pipeline.pdf for embedding."""
+    fig, ax = plt.subplots(figsize=(7.5, 3.3))
     ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+    ax.axis("off")
+
+    rng = np.random.default_rng(0)
+    blue, dark = "#1f4e79", "#0d2b45"
+    fill = "#eaf1f8"
+
+    # Stage frames -------------------------------------------------------
+    stages = [
+        (0.000, 0.155, "(a) Parametrized\nfiber axes"),
+        (0.175, 0.380, "(b) Multi-resolution\nneighborhood graph"),
+        (0.400, 0.575, "(c) SIREN per-subject\nimputation"),
+        (0.595, 0.780, "(d) CONFETI\nGNN heads"),
+        (0.800, 1.000, "(e) OOF attribution\n+ outputs"),
+    ]
+    for x0, x1, title in stages:
+        ax.add_patch(plt.Rectangle((x0, 0.08), x1 - x0, 0.72,
+                                   fill=True, facecolor=fill,
+                                   edgecolor=blue, lw=0.7))
+        ax.text((x0 + x1) / 2, 0.90, title, ha="center", va="center",
+                fontsize=7.5, fontweight="bold", color=dark)
+
+    # Arrows between stages
+    for i in range(len(stages) - 1):
+        ax.annotate("", xy=(stages[i + 1][0] - 0.001, 0.47),
+                    xytext=(stages[i][1] + 0.001, 0.47),
+                    arrowprops=dict(arrowstyle="-|>", lw=1.3,
+                                    color=dark, mutation_scale=14))
+
+    # ---- Panel (a): a few coloured tract curves with axis nodes --------
+    x0, x1, _ = stages[0]
+    cx = (x0 + x1) / 2
+    for i in range(4):
+        t = np.linspace(0, 1, 14)
+        xs = cx - 0.05 + 0.025 * i + 0.025 * np.sin(2 * np.pi * t + 0.7 * i)
+        ys = 0.20 + 0.55 * t
+        ax.plot(xs, ys, color=plt.cm.tab10(i), lw=1.1)
+        ax.scatter(xs[::3], ys[::3], s=4, color=plt.cm.tab10(i), zorder=5)
+    ax.text(cx, 0.13, "66 tracts, 5 metrics", ha="center",
+            fontsize=6.8, color="#444")
+
+    # ---- Panel (b): three nested point-clouds L0, L3, L6 with edges ---
+    x0, x1, _ = stages[1]
+    w = x1 - x0
+    centres = [(x0 + 0.18 * w, 0.62, 32, 0.045, "$L_0$"),
+               (x0 + 0.50 * w, 0.48, 14, 0.038, "$L_3$"),
+               (x0 + 0.82 * w, 0.34, 5,  0.022, "$L_6$")]
+    for ccx, ccy, n_pts, radius, lab in centres:
+        ang = rng.uniform(0, 2 * np.pi, n_pts)
+        rr = rng.uniform(0, radius, n_pts)
+        xs = ccx + rr * np.cos(ang)
+        ys = ccy + rr * np.sin(ang) * 0.65
+        for k in range(min(n_pts - 1, 6)):
+            j = rng.integers(0, n_pts)
+            ax.plot([xs[k], xs[j]], [ys[k], ys[j]], color="#9bb6d3", lw=0.5)
+        ax.scatter(xs, ys, s=5, color=dark, zorder=5)
+        ax.text(ccx + radius + 0.012, ccy, lab, ha="left", va="center",
+                fontsize=7.5, color=dark, fontweight="bold")
+    ax.text((x0 + x1) / 2, 0.13, "shared across subjects",
+            ha="center", fontsize=6.8, color="#444")
+
+    # ---- Panel (c): SIREN cartoon ---------------------------------------
+    x0, x1, _ = stages[2]
+    cx = (x0 + x1) / 2
+    # Observed nodes (filled) + missing nodes (hollow)
+    obs_x = cx + np.array([-0.05, -0.02, 0.02, 0.04])
+    obs_y = np.array([0.66, 0.62, 0.66, 0.62])
+    ax.scatter(obs_x, obs_y, s=18, color=dark, edgecolor=dark, zorder=5)
+    miss_x = cx + np.array([-0.035, 0.0, 0.025])
+    miss_y = np.array([0.64, 0.69, 0.65])
+    ax.scatter(miss_x, miss_y, s=18, facecolors="white",
+               edgecolors="#c0392b", linewidths=1.0, zorder=5)
+    # SIREN sin-wave curve as the implicit field
+    tt = np.linspace(0, 1, 50)
+    sx = (x0 + 0.10 * (x1 - x0)) + (x1 - x0) * 0.80 * tt
+    sy = 0.36 + 0.06 * np.sin(8 * np.pi * tt)
+    ax.plot(sx, sy, color="#1f4e79", lw=1.0)
+    ax.text(cx, 0.27, "$f_\\theta(x,y,z) \\mapsto \\mathbf{p}$",
+            ha="center", fontsize=7.2, color=dark)
+    ax.text(cx, 0.13, "fills missing diffusion\nprofiles per subject",
+            ha="center", fontsize=6.8, color="#444")
+
+    # ---- Panel (d): three stacked GNN heads ------------------------
+    x0, x1, _ = stages[3]
+    w = x1 - x0
+    heads = [(0.70, "Single-level GCN"),
+             (0.50, "Multi-scale concat"),
+             (0.30, "Graph U-Net"),]
+    for yy, lab in heads:
+        ax.add_patch(plt.Rectangle((x0 + 0.10 * w, yy - 0.05),
+                                   0.80 * w, 0.085,
+                                   facecolor="white", edgecolor=blue, lw=0.7))
+        ax.text((x0 + x1) / 2, yy - 0.008, lab, ha="center",
+                va="center", fontsize=7.2, color=dark)
+    ax.text((x0 + x1) / 2, 0.13, "shared front-end\n+ attribution back-end",
+            ha="center", fontsize=6.8, color="#444")
+
+    # ---- Panel (e): attribution chips + outputs ------------------------
+    x0, x1, _ = stages[4]
+    w = x1 - x0
+    attrs = ["OOF perm-imp", "Integrated grad.", "GNNExplainer"]
+    for i, lab in enumerate(attrs):
+        yy = 0.74 - 0.07 * i
+        ax.add_patch(plt.Rectangle((x0 + 0.08 * w, yy - 0.025),
+                                   0.55 * w, 0.045,
+                                   facecolor="white", edgecolor=blue, lw=0.6))
+        ax.text(x0 + 0.355 * w, yy - 0.003, lab, ha="center",
+                va="center", fontsize=6.6, color=dark)
+    # outputs box
+    ax.add_patch(plt.Rectangle((x0 + 0.06 * w, 0.18), 0.88 * w, 0.27,
+                               facecolor="white", edgecolor=blue, lw=0.7))
+    ax.text(x0 + 0.50 * w, 0.40,
+            "DS classification\n+ V24 regression\n+ per-tract map",
+            ha="center", va="center", fontsize=7.0, color=dark)
+
     fig.savefig(OUT / "fig_pipeline.pdf", bbox_inches="tight")
     fig.savefig(OUT / "fig_pipeline.png", dpi=180, bbox_inches="tight")
     plt.close(fig)

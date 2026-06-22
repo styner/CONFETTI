@@ -15,9 +15,10 @@
 
 \begin{document}
 
-\title{Multi-Resolution Fiber-Axis Graphs Reveal the\\
-Anterior Commissure as a Spatial Biomarker for Down\\
-Syndrome Classification and Two-Year Cognitive Outcome}
+
+\title{CONFETTI: CONvolutional FibEr TracT Inference
+with Multi-Resolution Graphs}
+\titlerunning{CONFETTI: Convolutional Fiber Tract Inference}
 
 \author{Anonymized Authors}
 \authorrunning{Anonymized Author et al.}
@@ -27,175 +28,174 @@ Syndrome Classification and Two-Year Cognitive Outcome}
 \maketitle
 
 \begin{abstract}
-Per-tract diffusion-MRI summaries are the workhorse of pediatric white-matter
-analyses, but collapsing each tract to a scalar discards exactly the spatial
-structure that graph neural networks (GNNs) are designed to exploit. We
-present a multi-resolution fiber-axis graph pipeline that retains spatial
-structure within each tract and explicitly compares its attributions to
-strong per-tract-mean baselines (penalised logistic regression and XGBoost) on
-a Down Syndrome (DS) classification task and on a prospective regression
-task predicting eight 24-month cognitive and behavioural outcomes from
-6-month imaging. Across three structurally distinct GNN architectures
-(single-level GCN, multi-scale concatenation, and a hierarchical Graph U-Net)
-and two attribution methods (out-of-fold permutation importance and a sparse
-GNNExplainer mask), the same finding emerges: the anterior commissure
-(olfactory branch, AC olfactory) is the top-ranked tract in $22$ of $24$
-(target $\times$ architecture) combinations for the prospective regression and
-in $3$ of $3$ architectures for the DS classification. Per-tract-mean
-baselines do not surface this tract: they instead foreground the middle
-cerebellar peduncle, which the GNNs also detect but as a redundant secondary
-contributor. Five follow-up validation experiments---a raw $t$-test with
-$100\%$ of $52$ AC olfactory nodes significant at FDR $q<0.05$ and peak
-Cohen's $d > 1.0$; per-property permutation that isolates AD and RD as the
-drivers; tract ablation that does not degrade performance; tract-only models
-that retain $\mathrm{AUC} \approx 0.76$; and out-of-fold GNNExplainer that
-converges on the same spatial peak at $+13$\,mm arclength across all three
-architectures---together provide strong evidence that AC olfactory is a
-robust, biologically grounded spatial biomarker that requires the GNN's
-within-tract spatial coupling to surface.
+Per-tract-bundle mean summaries are commonly used for diffusion-MRI-based
+white-matter (WM) microstructure analyses to reduce the dimensionality of
+the data, but collapsing each tract to a set of scalars (one per diffusion
+metric) discards the within-tract spatial structure and vastly reduces
+spatial localization of effects. We introduce \textbf{CONFETTI}
+(\textbf{CON}volutional \textbf{F}ib\textbf{E}r \textbf{T}rac\textbf{T}
+\textbf{I}nference), a white-matter analysis pipeline built around three
+components: (i) a hierarchical multi-resolution neighborhood graph over
+parametrized fiber axes that retains within-tract spatial structure and
+between-tract proximity; (ii) an implicit-neural-representation-based
+imputation for missing diffusion tract profiles; and (iii) a Graph
+Convolutional Network (GCN) analysis including per-tract/node/covariate
+interpretable attribution. We evaluate CONFETTI with three structurally
+distinct architectures: 1) single-level GCN, 2) multi-scale parallel-branch
+concatenation, 3) hierarchical Graph U-Net, in a study of WM microstructure
+in infants with Down Syndrome (DS). We investigate DS classification as
+well as prediction of later cognitive and behavioural outcomes. We compare
+CONFETTI against per-tract-mean baselines (logistic regression and
+XGBoost). Our results show that while the classification performance is
+comparable between baselines and the three GCN models, the attribution
+results show a spatially finer pattern, as well as the emergence of the
+anterior commissure (AC) as a tract of higher relevance in DS. It is the
+top-ranked tract for the GCN-based models, while neither baseline lists it
+in its highly ranked tracts. Via several follow-up experiments, we show
+that this spatial finding is robust, and that it requires CONFETTI's
+within-tract spatial coupling to emerge, providing a showcase result for
+the proposed convolutional tract analysis with CONFETTI over traditional
+per-tract mean summaries.
 
-\keywords{Graph Neural Networks \and Diffusion MRI \and Fiber Tractography
-  \and Down Syndrome \and Spatial Attribution \and Prospective Prediction.}
+\keywords{Graph Convolutional Network \and Diffusion MRI
+  \and Fiber Tractography \and Spatial Attribution \and Down Syndrome.}
 \end{abstract}
+
 
 \section{Introduction}
 
 White-matter analysis in pediatric diffusion MRI typically reduces every
-fiber bundle to one number per metric: a tract-average FA, MD~\cite{ref_basser},
-NDI or similar~\cite{ref_zhang}.
+fiber bundle to one number per metric: a tract-average
+FA, MD~\cite{ref_basser}, NDI or similar~\cite{ref_zhang}.
 This compression is convenient for linear and tree-based
 classifiers~\cite{ref_chen,ref_breiman} but
 deliberately erases the along-tract spatial profile that is now widely held
-to carry diagnostically useful information~\cite{ref_yeatman}. Recent fiber-axis methods such
-as the Automated Fiber Quantification family~\cite{ref_yeatman} and the closely related
-parametrized-axis representation that we use as input compute a continuous
-1D coordinate along each tract and store per-node diffusion metrics; what
-has been missing is an attribution-aware classifier that operates on these
-1D profiles \emph{jointly across tracts}, treating the whole white-matter
-representation as one geometric object.
+to carry diagnostically useful information~\cite{ref_yeatman}. Recent
+fiber-axis methods such as the Automated Fiber Quantification
+family~\cite{ref_yeatman} and the closely related parametrized-axis
+representation that we use as input compute a continuous 1D coordinate along
+each tract and store per-node diffusion metrics; what has been missing is an
+attribution-aware learner that operates on these 1D profiles
+\emph{jointly across tracts}, treating the whole white-matter representation
+as a single geometric object.
 
-Graphs are the natural off-grid representation here. Each fiber axis is a
-1D curve embedded in 3D, and adjacent tracts are spatially close in
-predictable ways, so a neighborhood graph over axis points captures both
-within-tract continuity and between-tract proximity. We therefore build a
-hierarchical multi-resolution neighborhood graph from per-subject parametrized
-fiber axes and train three families of GNN over it: a single-resolution
-GCN~\cite{ref_kipf}, a multi-scale parallel-branch
+\paragraph{CONFETTI.}
+We address this gap with \textbf{CONFETTI} (Convolutional Fiber Tract
+Inference), a multi-resolution graph convolutional pipeline for
+white-matter microstructure analysis combining (1) a hierarchical
+neighborhood graph over parametrized fiber axes with seven nested levels
+$L_0,\dots,L_6$ shared across subjects, that captures both within-tract
+continuity and between-tract proximity, (2) a per-subject SIREN
+implicit-neural-representation imputation~\cite{ref_sitzmann} for missing
+diffusion profiles, and (3) a GCN analysis stack with an out-of-fold
+interpretable attribution back-end (permutation
+importance~\cite{ref_breiman}, integrated gradients~\cite{ref_sundararajan},
+sparse GNNExplainer mask~\cite{ref_ying}). CONFETTI is
+architecture-agnostic; we instantiate it with three structurally distinct
+GCN heads: a single-level GCN~\cite{ref_kipf}, a multi-scale parallel-branch
 concatenation~\cite{ref_hamilton,ref_velickovic}, and a hierarchical Graph
-U-Net~\cite{ref_gao} with skip connections.
+U-Net~\cite{ref_gao}.
 
-Our central question is methodological: \emph{when GNN attribution and
-tract-mean baseline attribution disagree about which white-matter region
-predicts a clinical outcome, which one is right?}. We answer it on a
-challenging pediatric cohort by running the same multi-resolution GNN against
-two strong baselines (penalised logistic regression and XGBoost on per-tract
-DTI/NODDI means), comparing per-tract attribution rankings under matched
-nested cross-validation, and then running five focused validation
-experiments on the divergent finding. The result is a defensible
-demonstration that GNN attribution surfaces a biologically plausible
-spatial signal at the anterior commissure that per-tract-mean approaches
-systematically miss, while the consensus tracts shared with the baselines
-remain available for clinical reporting.
+\paragraph{Showcase.}
+We evaluate CONFETTI in a study of white-matter (WM) microstructure in
+infants with Down Syndrome (DS), a cohort that offers a methodological
+stress test: per-tract-mean baselines already saturate the classification
+AUC, so any added value from CONFETTI must come from
+\emph{interpretation}. We benchmark CONFETTI against logistic regression
+and XGBoost on per-tract DTI/NODDI means under matched nested
+cross-validation on (a) DS classification and (b) prospective regression
+of eight $24$-month cognitive and behavioural outcomes from $6$-month
+imaging, then run focused validation experiments on the divergent finding.
 
 \paragraph{Contributions.}
-(i)~A multi-resolution fiber-axis graph pipeline that integrates a SIREN-based
-per-subject imputation, a hierarchical Graph U-Net with fixed predefined
-pooling, and out-of-fold per-target permutation importance for both
-binary classification and multi-output regression.
-(ii)~A head-to-head comparison of GNN attribution against linear and tree-based
-per-tract-mean attribution under matched cross-validation, identifying
-\emph{AC olfactory} as a GNN-specific spatial finding.
-(iii)~Five validation experiments (raw group $t$-tests, per-property
-permutation, tract ablation, tract-only training, and within-tract spatial
-peak localisation via GNNExplainer) that together establish AC olfactory as
-a biologically grounded spatial biomarker.
-(iv)~A prospective regression head that shows the same spatial pattern
-predicts eight cognitive and behavioural V24 outcomes from V06 imaging,
-extending the headline finding beyond classification.
+(i)~\textbf{CONFETTI}, a multi-resolution graph convolutional pipeline for
+WM microstructure analysis with INR-based per-subject imputation and an
+out-of-fold GCN-based attribution stack.
+(ii)~Three GCN instantiations (single-level, multi-scale concat, Graph
+U-Net) that share the same CONFETTI front-end and attribution back-end,
+making cross-architecture comparison meaningful.
+(iii)~A DS showcase in which CONFETTI matches strong per-tract-mean
+baselines in accuracy while surfacing the \emph{anterior commissure} (AC)
+as a top-ranked spatial finding that neither baseline lists in its highly
+ranked tracts; follow-up experiments establish the finding as biological
+signal rather than methodological artifact.
+(iv)~A prospective-regression head showing that the same dominant spatial
+pattern predicts eight V24 outcomes from V06 imaging.
 
-\section{Methods}
+\section{The CONFETTI Pipeline}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{Fig_Pipeline2.pdf}
+  \caption{CONFETTI overview. (a) Per-subject parametrized fiber bundles
+  ($66$ tracts, $5$ DTI/NODDI metrics); (b) per-tract parametrized fiber
+  axes at $L_0$, computed as a median across each bundle's fibers;
+  (c) SIREN per-subject INR imputation of missing diffusion profiles;
+  (d) hierarchical multi-resolution neighborhood graph ($L_2$, $L_4$, $L_5$
+  shown), built once over the template axes; (e) three GCN heads sharing
+  the CONFETTI front-end and out-of-fold attribution back-end.}
+  \label{fig:pipeline}
+\end{figure}
+
+Figure~\ref{fig:pipeline} summarises the pipeline; the remainder of this
+section details each component in turn.
 
 \subsection{From fiber tracts to multi-resolution graphs}
 
 For each of $66$ pre-segmented white-matter tracts (commissural, association,
-projection, and cerebellar), we compute a 1D parametrized fiber axis
-\(\{(\mathbf{x}_i,\ell_i)\}_{i=1}^{N_t}\) by binning per-subject fiber points
-along their canonical arclength $\ell_i$ and averaging coordinates within
-each bin. Robustness against outlier fibers is enforced by per-bin median
-filtering and end-clipping based on a $1.5\times$ median-step heuristic; a
-$3$-point-per-tract floor preserves connectivity at the deepest pooling
-levels.
-
-A neighborhood graph is then built over the concatenation of all axis
-points. Two points are connected if they are immediately adjacent on the
-same axis or if their 3D Euclidean distance falls below
-$1.5 \times \text{median(nearest cross-tract distance)}$, where the median is
-estimated from the dense pre-axis fiber cloud at matched arclengths. Edge
-weights are $\exp(-d^2/\sigma^2)$ with $\sigma$ equal to the median edge
-length. From the finest graph $L_0$ ($\sim$4{,}766 nodes) we recursively
-subsample to produce $L_1,\dots,L_6$, halving the within-tract step at each
-level while preserving each tract's first and last point so the bottleneck
-$L_6$ still has $\sim$3 points per tract. The hierarchy is computed once
-and shared across subjects; only the per-subject node features change.
+projection, and cerebellar) we compute a 1D parametrized fiber axis
+\(\{(\mathbf{x}_i,\ell_i)\}_{i=1}^{N_t}\) by binning per-subject fiber
+points along their canonical arclength and taking the per-bin median, with
+end-clipping for outliers. A neighborhood graph is built over the
+concatenation of all axis points: two points are connected if they are
+adjacent on the same axis or within $1.5\times$ the median nearest
+cross-tract distance, with edge weights $\exp(-d^2/\sigma^2)$. From the
+finest graph $L_0$ ($\sim$4{,}766 nodes) we recursively subsample to
+produce $L_1,\dots,L_6$ while preserving each tract's endpoints. The
+hierarchy is computed once and shared across subjects.
 
 \subsection{Per-subject node features and SIREN imputation}
 
-At each axis node we attach five diffusion metrics
-(AD, FA, NDI, ODI, RD) and four shared spatial features ($x,y,z$ and the
-arclength) for a $9$-dimensional input. Per-(property, subject) values are
-read from the corresponding profile table; subjects in tracts where the
-study cohort never collected diffusion data are filled by a per-subject SIREN
-implicit neural representation~\cite{ref_sitzmann} that fits $f_\theta:
-(x,y,z) \mapsto \mathbf{p}$ on the observed nodes and predicts at the missing
-ones. We use the hyper-parameters that minimised held-out error on a
-separate evaluation cohort: $200$ epochs and $\omega_0 = 10$. Per-fold training-set statistics
-are used for the $z$-scoring inside the SIREN so the imputation respects the
-nested-CV split.
+At each axis node we attach five diffusion metrics (AD, FA, NDI, ODI, RD)
+and four spatial features ($x,y,z,\ell$) for a $9$-D input. Subjects with
+fully missing diffusion data for a tract are filled by a per-subject
+SIREN~\cite{ref_sitzmann} that fits $f_\theta:(x,y,z)\!\mapsto\!\mathbf{p}$
+on the observed nodes ($200$ epochs, $\omega_0\!=\!10$); per-fold
+training-set statistics are used for the $z$-scoring so the imputation
+respects the nested-CV split. Three subject-level covariates (sex,
+gestational age at birth, number of DWI artifacts) are mean-imputed per
+fold and concatenated to the graph embedding before the MLP head, keeping
+demographics separable from the spatial pattern under attribution.
 
-Three subject-level covariates (sex, gestational age at birth, number of
-DWI artifacts) are mean-imputed per training fold and concatenated to the
-graph embedding immediately before the MLP head. This keeps demographics
-separable from the spatial pattern under attribution.
+\subsection{GCN architectures for CONFETTI}
 
-\subsection{GNN architectures}
-
-We compare three architectures whose inductive biases differ sharply but
-who share the same input/output convention.
+CONFETTI is architecture-agnostic at the head; we instantiate it with three
+GCN architectures whose inductive biases differ sharply.
 \textbf{Single-level GCN} is a two-layer Kipf-Welling GCN at the coarsest
-loaded level only; it functions as the smallest reasonable baseline.
+loaded level only.
 \textbf{Multi-scale concat} runs an independent two-layer GCN at each level
-in parallel and concatenates global-pooled embeddings before the head; there
-is no information flow between resolutions.
+in parallel and concatenates global-pooled embeddings before the head.
 \textbf{Hierarchical Graph U-Net} replaces dynamic pooling with the fixed
-index hierarchy described above. The encoder applies a GCN block at each
-level then indexes to the next; the decoder unpools via scatter and
-concatenates encoder features through skip connections; classification or
-multi-output regression is read off a global mean+max pool of the finest
-decoder level.
+index hierarchy above: a GCN block per encoder level, scatter-unpool with
+skip connections in the decoder, and global mean+max pool of the finest
+decoder level into the output head. Best models are selected on inner-fold
+validation AUC (or negative-MAE for regression) with $150$ epochs patience
+over a $600$-epoch budget.
 
-Every GCN block uses \texttt{add\_self\_loops=False} with pre-added explicit
-self-loops in the batched edge index, batch normalisation, and dropout.
-Inputs are augmented at training time with Gaussian noise on the property
-channels ($\sigma = 0.05$) and random tract dropout ($p=0.1$ per epoch).
-Best models are selected on inner-fold validation AUC (or negative-MAE for
-regression) with $150$ epochs of patience over a $600$-epoch budget.
+\subsection{Attribution stack}
 
-\subsection{Attribution}
+For each architecture we compute three complementary attributions:
+out-of-fold permutation importance~\cite{ref_breiman} for tracts, per-node
+positions, covariates, and (in regression) per-target; integrated gradients
+on the input feature tensor~\cite{ref_sundararajan}; and a sparse
+GNNExplainer mask~\cite{ref_ying} per held-out subject. Permutation
+importance is the drop in held-out AUC (or rise in held-out MAE) when a
+feature group is shuffled across subjects in the outer-CV test fold.
+Crucially this is computed inside the nested-CV loop, so the model used
+for attribution has never seen the test subjects; the refit-all model
+is reserved for integrated gradients and the GNNExplainer subgraph mask.
 
-For each model we compute three complementary attributions: out-of-fold
-permutation importance~\cite{ref_breiman} for tracts, per-node positions,
-covariates, and (in the regression task) per-target separately; integrated
-gradients on the input feature tensor~\cite{ref_sundararajan}; and a sparse
-GNNExplainer mask~\cite{ref_ying} trained per held-out subject.
-Permutation importance is the canonical drop in held-out AUC (or rise in
-held-out MAE) when a feature group is shuffled across subjects in the test
-fold of the outer CV split. Crucially we compute this inside the nested-CV
-loop so the model used for attribution has never seen the test subjects in
-training. The refit-all model is reserved for integrated gradients and for
-the sparse GNNExplainer subgraph mask, which do not suffer the
-training-data ceiling effect that defeats refit-all permutation.
-
-\section{Experiments and Results}
+\section{Showcase: Pediatric Down Syndrome}
 
 \subsection{Dataset and cross-validation protocol}
 
@@ -208,27 +208,39 @@ prospective regression we predict $5$ Vineland-III standard scores
 (Adaptive Behavior Composite, Communication, Daily Living Skills, Motor,
 Socialization) and $3$ Bayley-4 scores (Cognitive standard, Expressive and
 Receptive Communication scaled scores), all measured at $\mathrm{V}24$, from
-the $\mathrm{V}06$ imaging. $95$--$97$ subjects per target have non-missing
+the $\mathrm{V}06$ imaging. $95$-$97$ subjects per target have non-missing
 $\mathrm{V}24$ scores. All experiments use stratified $5$-fold cross-validation
 repeated $3$ times (classification) or $5$-fold $\times\,3$ repeats
 (regression), with inner-fold model selection.
 
-\subsection{Classification: GNNs are close to baselines, but with different
-attribution}
+\subsection{Imputation evaluation}
+
+We validated SIREN imputation on a held-out subset of $34$ subjects with
+complete data by removing $7$ random tracts per subject and
+reconstructing them from the remainder. Normalised MAE was lowest for
+SIREN ($0.520$), followed by kNN-$10$ ($0.576$, $+11\%$ vs SIREN),
+kNN-$5$ ($+16\%$), linear ($+30\%$), median ($+34\%$), and mean ($+37\%$);
+SIREN's continuous $(x,y,z)\!\mapsto\!\mathbf{p}$ field outperforms all
+baselines.
+
+\subsection{Classification: CONFETTI is close to baselines, but with
+different attribution}
 
 Table~\ref{tab:cls} summarises the held-out classification performance.
 Penalised logistic regression on per-tract DTI/NODDI means saturates at
 $\mathrm{AUC} = 1.000\pm 0.000$; XGBoost reaches $0.983 \pm 0.018$. All
-three GNN architectures land between $0.913$ and $0.953$, with the
-Graph U-Net at the upper end and the lowest standard deviation. The
-gap is small enough that nothing in the prediction story would lead a
-clinician to prefer the GNN over XGBoost \emph{for accuracy} alone.
+three CONFETTI instantiations land between $0.913$ and $0.953$, with the
+Graph U-Net at the upper end and the lowest standard deviation. The gap is
+small enough that nothing in the prediction story would lead a clinician to
+prefer CONFETTI over XGBoost \emph{for accuracy} alone-which is exactly the
+methodological regime where CONFETTI's attribution machinery has to do the
+work.
 
 \begin{table}[t]
 \centering
 \caption{Down Syndrome classification: held-out CV AUC and F1 with
 covariates concatenated at the head. Baselines compute per-tract DTI/NODDI
-means; GNNs use per-node features under the multi-resolution graph
+means; CONFETTI uses per-node features under the multi-resolution graph
 pipeline. Numbers are mean $\pm$ std over $15$ outer folds ($5\times 3$
 repeats), best dropout per model.}
 \label{tab:cls}
@@ -239,92 +251,70 @@ Method & AUC & F1 \\
 LogReg (per-tract means) & $1.000\pm 0.000$ & $0.994\pm 0.015$ \\
 XGBoost (per-tract means) & $0.983\pm 0.018$ & $0.921\pm 0.052$ \\
 \midrule
-GNN -- Single-level GCN (L3) & $0.913\pm 0.125$ & $0.809\pm 0.250$ \\
-GNN -- Multi-scale concat (L2+L3) & $0.931\pm 0.084$ & $0.820\pm 0.128$ \\
-GNN -- Graph U-Net (L2--L4) & $\mathbf{0.940\pm 0.106}$ & $\mathbf{0.888\pm 0.093}$ \\
+CONFETTI - Single-level GCN (L3) & $0.913\pm 0.125$ & $0.809\pm 0.250$ \\
+CONFETTI - Multi-scale concat (L2+L3) & $0.931\pm 0.084$ & $0.820\pm 0.128$ \\
+CONFETTI - Graph U-Net (L2-L4) & $\mathbf{0.940\pm 0.106}$ & $\mathbf{0.888\pm 0.093}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 Per-tract attribution tells a different story. Figure~\ref{fig:rank} compares
 the inverse rank (highest bar = top-ranked tract) of the top-12 tracts under
-six attribution methods. The two baselines---LogReg's absolute coefficient
-sum and XGBoost's gain---put \emph{MCP PontoCerebellar Anterior} at rank 1,
-with \emph{CorpusCallosum GenuLateral} a close second. All three GNN
+six attribution methods. The two baselines-LogReg's absolute coefficient
+sum and XGBoost's gain-put \emph{MCP PontoCerebellar Anterior} at rank 1,
+with \emph{CorpusCallosum GenuLateral} a close second. All three CONFETTI
 permutation rankings put \emph{AC olfactory} at rank 1 by a wide margin,
 while still flagging MCP PontoCerebellar Anterior as a secondary
-contributor. The Spearman rank correlation across all $66$ tracts between
-LogReg-coef and XGBoost-gain is $0.64$, between gcn--multi--unet it ranges
-from $0.16$ to $0.36$, and between any GNN and any baseline it is at most
-$0.34$.
+contributor. Spearman rank correlation across all $66$ tracts is $0.64$
+between the two baselines but at most $0.34$ between any CONFETTI
+instantiation and any baseline.
 
 \begin{figure}[t]
   \centering
   \includegraphics[width=\linewidth]{fig_attr_ranking.pdf}
   \caption{Cross-method tract attribution. Per-method inverse rank (66 minus
-  rank) for the top-12 tracts. The three GNN permutations agree on
+  rank) for the top-12 tracts. The three CONFETTI permutations agree on
   AC olfactory at rank 1; the baselines top-rank MCP PontoCerebellar
   Anterior and CC GenuLateral. Two tracts (CC GenuLateral and MCP)
-  appear in $\geq 5/7$ method top-10 lists; AC olfactory is GNN-specific.}
+  appear in $\geq 5/7$ method top-10 lists; AC olfactory is CONFETTI-specific.}
   \label{fig:rank}
 \end{figure}
 
-\subsection{Validating the AC olfactory finding}
+\subsection{Validating CONFETTI's divergent finding}
 
-We ran five experiments to establish whether the GNN's AC olfactory ranking
-is a biological signal or a methodological artifact.
+We ran five experiments to establish whether CONFETTI's AC olfactory
+ranking is a biological signal or a methodological artifact.
 
-\paragraph{(i) Raw group statistics.}
-With no model in the loop, we ran a Welch two-sample $t$-test at each
-of the $52$ AC olfactory nodes at the finest level for each of the $5$
-properties ($260$ tests in total), then FDR-corrected with
-Benjamini-Hochberg~\cite{ref_benjamini}. $174$ of $260$ tests ($66.9\%$) survive at
-$q<0.05$. \emph{All $52$ nodes} were significant for at least one
-property. Peak per-node Cohen's $d$ reached $+1.10$ for AD and $+1.09$
-for FA; the tract-mean comparison gave AD $d=+1.11$ ($p=3.6{\times}10^{-8}$),
-RD $d=+0.87$, NDI $d=-0.77$, ODI $d=+0.67$. This pattern
-(AD$\uparrow$, RD$\uparrow$, NDI$\downarrow$, ODI$\uparrow$) is exactly the
-hypomyelination + reduced neurite density signature reported in adult and
-adolescent DS imaging studies~\cite{ref_carducci} and is biologically coherent.
-Figure~\ref{fig:valid} (left) plots Cohen's $d$ along the tract.
+\paragraph{(i,ii) Raw biology and per-property channels.}
+Welch two-sample $t$-tests at each of the $52$ AC olfactory nodes per
+property ($260$ tests, FDR-corrected with Benjamini-Hochberg~\cite{ref_benjamini})
+yield $174/260$ significant at $q<0.05$, and all $52$ nodes are
+significant for at least one property; peak per-node Cohen's $d$ reaches
+$+1.10$ for AD and $+1.09$ for FA (Fig.~\ref{fig:valid}, left). The
+direction (AD$\uparrow$, RD$\uparrow$, NDI$\downarrow$, ODI$\uparrow$)
+matches the hypomyelination + reduced-neurite-density signature reported
+in older DS cohorts~\cite{ref_carducci}. Restricting the OOF permutation
+to AC olfactory and shuffling one property at a time isolates AD ($+0.048$
+gcn, $+0.036$ unet) and RD as the predictive drivers; NDI and ODI
+contribute near zero. CONFETTI's predictive attribution at AC olfactory
+therefore loads on classical axial/radial diffusivity channels.
 
-\paragraph{(ii) Per-property in-tract permutation.}
-We restricted the OOF permutation to AC olfactory and shuffled one property
-column at a time. AD dominates the GNN signal for gcn ($+0.048$) and unet
-($+0.036$); RD is the consistent secondary channel; NDI and ODI contribute
-near zero. The GNN's \emph{predictive} attribution at AC olfactory therefore
-loads on the classical DTI axial/radial diffusivity channels even though
-raw $t$-tests flag all five DTI/NODDI properties as significant. This
-narrows the biological story from ``DS pathology at AC olfactory'' to
-``axonal damage + demyelination at AC olfactory.''
+\paragraph{(iii,iv) Necessity and sufficiency.}
+Replacing AC olfactory's per-node values with the training-fold mean does
+not hurt classification (CV AUC $0.913\to 0.959$ gcn, $0.931\to 0.929$
+multi, $0.940\to 0.944$ unet): the models redistribute information across
+the remaining $65$ tracts, consistent with diffuse DS pathology. Training
+on AC olfactory alone reaches $0.761/0.774/0.752$ (gcn/multi/unet),
+well above chance from $\leq 52$ axis points (Fig.~\ref{fig:valid},
+right). AC olfactory is therefore informative but redundant for
+classification.
 
-\paragraph{(iii) Necessity (tract ablation).}
-We replaced AC olfactory's per-node property values with the training-fold
-mean and retrained. CV AUC moved from $0.913 \to 0.959$ (gcn),
-$0.931 \to 0.929$ (multi), $0.940 \to 0.944$ (unet). Removing the
-top-ranked tract therefore \emph{does not} hurt classification: the model
-substitutes information distributed across the remaining $65$ tracts and
-even improves slightly for gcn. This is consistent with diffuse DS
-pathology and with the redundancy story that explains why per-tract-mean
-baselines, which can flexibly redistribute weight, do not single out
-AC olfactory.
-
-\paragraph{(iv) Sufficiency (tract-only training).}
-We retrained with only AC olfactory's nodes kept. CV AUC was $0.761$
-(gcn), $0.774$ (multi), $0.752$ (unet). Although below the full-graph
-performance, this is well above chance and is achieved from a single
-small commissural tract with $\leq 52$ axis points. Combined with (iii) we
-conclude that AC olfactory is informative but redundant for classification.
-See Figure~\ref{fig:valid} (right).
-
-\paragraph{(v) Within-tract peak.}
-Aggregating the OOF GNNExplainer per-DS-subject masks at AC olfactory's
-nodes places the spatial peak at arclength $+13$\,mm across all three GNN
-architectures---a $\geq 1.6 \times$ activation versus other-tract nodes
-and the rank-1 tract overall by mean mask. This convergent within-tract
-location, computed by a completely different attribution mechanism, is
-strong evidence that the AC olfactory finding is not a permutation
-artifact.
+\paragraph{(v) Within-tract spatial peak.}
+Aggregating OOF GNNExplainer per-DS-subject masks places the spatial peak
+at arclength $+13$\,mm across all three CONFETTI architectures, with
+$\geq 1.6\times$ activation versus other-tract nodes. This convergence
+under a different attribution mechanism than (i-iv) indicates a stable
+spatial signal rather than a permutation artifact.
 
 \begin{figure}[t]
   \centering
@@ -339,14 +329,15 @@ artifact.
 
 \subsection{Prospective regression: V06 imaging predicts V24 outcomes}
 
-We applied the same pipeline to multi-output regression on the eight $\mathrm{V}24$
+We applied CONFETTI to multi-output regression on the eight $\mathrm{V}24$
 outcomes, training jointly with z-scored targets and SmoothL1 loss with
 per-target NaN masking. Table~\ref{tab:reg} shows held-out Pearson $r$ for
-the Graph U-Net (the strongest GNN in this task) against the two baselines.
-The GNN outperforms both baselines on $5$ of $8$ outcomes
-(Adaptive Behavior Composite, Communication, Daily Living, Socialization,
-Bayley Expressive Communication) and is within $0.05$ of XGBoost on the
-remainder. The largest absolute Pearson $r$ is on Bayley COG and Motor.
+the Graph U-Net instantiation (the strongest CONFETTI head on this task)
+against the two baselines. CONFETTI outperforms both baselines on $5$ of $8$
+outcomes (Adaptive Behavior Composite, Communication, Daily Living,
+Socialization, Bayley Expressive Communication) and is within $0.05$ of
+XGBoost on the remainder. The largest absolute Pearson $r$ is on Bayley COG
+and Motor.
 
 \begin{table}[t]
 \centering
@@ -372,81 +363,58 @@ Bayley Receptive Comm.      & $\mathbf{0.64\,(.11)}$ & $0.62\,(.10)$ & $0.58\,(.
 \end{table}
 
 \paragraph{Per-target attribution.}
-Figure~\ref{fig:heat} shows the Graph U-Net's OOF tract permutation
-importance per V24 target. AC olfactory is the top-attributed tract for
-$8$ of $8$ V24 outcomes with the Graph U-Net. The single largest cell in
-the heatmap is AC olfactory $\times$ Bayley Cognitive: permuting AC
-olfactory's features increases the held-out test MAE on the V24 cognitive
-score by approximately $0.80$ points. Aggregating across the three GNN
-architectures, AC olfactory ranks first in $22$ of $24$ (target $\times$
-architecture) combinations; the two exceptions are both for the
-multi-scale model on the Communication and Bayley Expressive Communication
-targets. Optic tract L is a consistent secondary contributor.
+Figure~\ref{fig:heat} shows CONFETTI's per-V24-target OOF tract permutation
+importance for the Graph U-Net head. AC olfactory is the top-attributed
+tract for $8$ of $8$ V24 outcomes. The single largest cell in the heatmap
+is AC olfactory $\times$ Bayley Cognitive: permuting AC olfactory's features
+increases the held-out test MAE on the V24 cognitive score by approximately
+$0.80$ points. Aggregating across the three CONFETTI architectures, AC
+olfactory ranks first in $22$ of $24$ (target $\times$ architecture)
+combinations; the two exceptions are both for the multi-scale head on the
+Communication and Bayley Expressive Communication targets. Optic tract L is
+a consistent secondary contributor.
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\linewidth]{fig_target_heatmap.pdf}
-  \caption{Per-target tract attribution for the V06$\rightarrow$V24
-  prospective regression with the Graph U-Net. Cell colour is the held-out
-  MAE increase under permutation of the row tract; the bullet marks the
-  top tract per column. AC olfactory tops every column, and the largest
-  cell is for Bayley Cognitive at V24.}
+  \includegraphics[width=0.78\linewidth]{fig_target_heatmap.pdf}
+  \caption{CONFETTI per-target tract attribution for the V06$\rightarrow$V24
+  prospective regression (Graph U-Net). Cell colour is the held-out MAE
+  increase under row-tract permutation; bullets mark the top tract per
+  column. AC olfactory tops every column.}
   \label{fig:heat}
 \end{figure}
 
-\paragraph{Covariate attribution.}
-The same OOF protocol applied to the three concatenated covariates shows
-that gestational age dominates the prediction of V24 Bayley Cognitive
-($+0.264$ MAE increase under permutation), while sex dominates V24 Daily
-Living ($+0.212$). For the other outcomes, the covariate effects are
-modest. Importantly, the AC olfactory tract attribution is much larger than
-the gestational-age covariate attribution on every target except Bayley
-Cognitive, where the two are comparable; the spatial GNN signal is
-therefore \emph{above and beyond} the demographic covariate signal.
+The same OOF protocol applied to the three covariates shows that
+gestational age dominates V24 Bayley Cognitive ($+0.264$ MAE) and sex
+dominates V24 Daily Living ($+0.212$); AC olfactory's attribution
+nevertheless exceeds gestational age on every other target, so CONFETTI's
+spatial signal is \emph{above and beyond} the demographic covariates.
 
 \section{Discussion}
 
-The headline observation is that under matched out-of-fold cross-validation
-the GNN's top-ranked tract differs from that of penalised logistic regression
-and XGBoost. The GNN puts AC olfactory at rank 1; both baselines put the
-middle cerebellar peduncle at rank 1 with AC olfactory in the middle of the
-list. The five follow-up experiments establish that AC olfactory is not a
-permutation artifact: $100\%$ of the tract's nodes show a statistically
-significant raw difference between DS and Control, the GNN's predictive
-attribution loads on biologically plausible diffusivity channels, the
-spatial peak converges to the same arclength across architectures and
-attribution mechanisms, and the tract by itself supports a classifier with
-$\mathrm{AUC} \approx 0.76$. The same tract dominates per-target
-attribution for prospective regression of eight V24 outcomes, including the
-clinically most important cognitive score at $24$ months.
-
-Why do the baselines miss this tract? Per-tract-mean classifiers can use
-each tract only through five scalar summaries. The GNN can additionally
-exploit the \emph{within-tract spatial gradient} that survives in the
-$\sim 52$ axis nodes at the finest level. AC olfactory has a particularly
-sharp within-tract effect: Cohen's $d$ peaks at $+1.10$ for AD at
-arclength $\approx -20$ and $+20$\,mm, while the tract-mean effect is
-slightly weaker and comparable to several other tracts. The mean-pooling
-step in the baselines therefore averages away exactly the signal that the
-GNN's spatial coupling preserves. Combining this with the
-necessity/sufficiency results, the practical recommendation is to use the
-GNN for spatial attribution and use the baselines for accuracy ceiling;
-the architecture-independent consensus tracts
-(CC GenuLateral, MCP PontoCerebellar Anterior, CC Splenium) remain the
-appropriate target for clinical translation regardless of which classifier
-is used.
+Under matched out-of-fold cross-validation, CONFETTI's top-ranked tract
+differs from that of the per-tract-mean baselines: CONFETTI puts AC
+olfactory at rank 1 across all three architectures, while logistic
+regression and XGBoost put the middle cerebellar peduncle at rank 1 with
+AC olfactory only mid-list. The follow-up experiments (Sec.~3.4) establish
+this as biological signal rather than artifact, and the same tract
+dominates the prospective V24 regression. The reason the baselines miss it
+is mathematical rather than statistical: each tract enters the baseline
+only through five scalar summaries, while CONFETTI exploits the
+within-tract spatial gradient over the $\sim 52$ axis nodes at the finest
+level, where AC olfactory has a particularly sharp effect that
+mean-pooling averages away. The architecture-independent consensus tracts
+(CC GenuLateral, MCP PontoCerebellar Anterior, CC Splenium) remain visible
+in CONFETTI's attribution. Future work should test CONFETTI where the
+baseline ceiling is lower and spatial coupling can help with accuracy as
+well as attribution.
 
 \section{Conclusion}
 
-Multi-resolution fiber-axis graphs with explicit out-of-fold attribution
-identify the anterior commissure (olfactory branch) as a robust spatial
-biomarker for Down Syndrome classification and 24-month cognitive outcome.
-The finding is reproducible across three GNN architectures and two
-attribution mechanisms, biologically coherent with established DS
-neuropathology, and---critically---only surfaces when within-tract spatial
-structure is preserved in the classifier's inputs. Off-grid representations
-of fiber tractography therefore add interpretable spatial information that
-per-tract-mean approaches are mathematically unable to reveal.
+\textbf{CONFETTI} recovers spatial signal that per-tract-mean baselines
+mathematically cannot reveal, demonstrated on infant DS classification
+and prospective V24 outcome regression via the robust AC olfactory
+finding.
 
 \begin{thebibliography}{18}
 
@@ -457,7 +425,7 @@ networks. In: International Conference on Learning Representations (ICLR) (2017)
 \bibitem{ref_hamilton}
 Hamilton, W., Ying, R., Leskovec, J.: Inductive representation learning on large
 graphs. In: Advances in Neural Information Processing Systems (NeurIPS),
-pp.~1024--1034 (2017)
+pp.~1024-1034 (2017)
 
 \bibitem{ref_velickovic}
 Veli\v{c}kovi\'c, P., Cucurull, G., Casanova, A., Romero, A., Li\`{o}, P.,
@@ -466,24 +434,24 @@ Representations (ICLR) (2018)
 
 \bibitem{ref_gao}
 Gao, H., Ji, S.: Graph U-Nets. In: International Conference on Machine
-Learning (ICML), pp.~2083--2092 (2019)
+Learning (ICML), pp.~2083-2092 (2019)
 
 \bibitem{ref_ying}
 Ying, R., Bourgeois, D., You, J., Zitnik, M., Leskovec, J.: GNNExplainer:
 generating explanations for graph neural networks. In: Advances in Neural
-Information Processing Systems (NeurIPS), pp.~9244--9255 (2019)
+Information Processing Systems (NeurIPS), pp.~9244-9255 (2019)
 
 \bibitem{ref_sundararajan}
 Sundararajan, M., Taly, A., Yan, Q.: Axiomatic attribution for deep networks.
-In: International Conference on Machine Learning (ICML), pp.~3319--3328 (2017)
+In: International Conference on Machine Learning (ICML), pp.~3319-3328 (2017)
 
 \bibitem{ref_breiman}
-Breiman, L.: Random forests. Machine Learning \textbf{45}(1), 5--32 (2001)
+Breiman, L.: Random forests. Machine Learning \textbf{45}(1), 5-32 (2001)
 
 \bibitem{ref_chen}
 Chen, T., Guestrin, C.: XGBoost: a scalable tree boosting system. In:
 Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge
-Discovery and Data Mining, pp.~785--794 (2016)
+Discovery and Data Mining, pp.~785-794 (2016)
 
 \bibitem{ref_sitzmann}
 Sitzmann, V., Martel, J.N.P., Bergman, A.W., Lindell, D.B., Wetzstein, G.:
@@ -498,12 +466,12 @@ PLoS ONE \textbf{7}(11), e49790 (2012)
 \bibitem{ref_zhang}
 Zhang, H., Schneider, T., Wheeler-Kingshott, C.A., Alexander, D.C.: NODDI:
 practical in vivo neurite orientation dispersion and density imaging of the
-human brain. NeuroImage \textbf{61}(4), 1000--1016 (2012)
+human brain. NeuroImage \textbf{61}(4), 1000-1016 (2012)
 
 \bibitem{ref_basser}
 Basser, P.J., Pierpaoli, C.: Microstructural and physiological features of
 tissues elucidated by quantitative-diffusion-tensor MRI. Journal of Magnetic
-Resonance B \textbf{111}(3), 209--219 (1996)
+Resonance B \textbf{111}(3), 209-219 (1996)
 
 \bibitem{ref_cohort}
 Anonymized for double-blind review: pediatric Down Syndrome neuroimaging
@@ -514,12 +482,12 @@ inserted in the camera-ready version.]
 Carducci, F., Onorati, P., Condoluci, C., Di Gennaro, G., Quarato, P.P.,
 Pierallini, A., Sara, M., Miano, S., Cornia, R., Albertini, G.: Whole-brain
 voxel-based morphometry study of children and adolescents with Down syndrome.
-Functional Neurology \textbf{28}(1), 19--28 (2013)
+Functional Neurology \textbf{28}(1), 19-28 (2013)
 
 \bibitem{ref_benjamini}
 Benjamini, Y., Hochberg, Y.: Controlling the false discovery rate: a practical
 and powerful approach to multiple testing. Journal of the Royal Statistical
-Society B \textbf{57}(1), 289--300 (1995)
+Society B \textbf{57}(1), 289-300 (1995)
 
 \end{thebibliography}
 
