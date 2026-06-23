@@ -1,0 +1,72 @@
+\relax 
+\citation{ref_basser}
+\citation{ref_zhang}
+\citation{ref_chen,ref_breiman}
+\citation{ref_yeatman}
+\citation{ref_yeatman}
+\@writefile{toc}{\contentsline {title}{CONFETTI: CONvolutional FibEr TracT Inference with Multi-Resolution Graphs}{1}{}\protected@file@percent }
+\@writefile{toc}{\authcount {1}}
+\@writefile{toc}{\contentsline {author}{Anonymized Authors}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{}\protected@file@percent }
+\citation{ref_sitzmann}
+\citation{ref_breiman}
+\citation{ref_sundararajan}
+\citation{ref_ying}
+\citation{ref_kipf}
+\citation{ref_hamilton,ref_velickovic}
+\citation{ref_gao}
+\@writefile{toc}{\contentsline {paragraph}{CONFETTI.}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Showcase.}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Contributions.}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}The CONFETTI Pipeline}{2}{}\protected@file@percent }
+\citation{ref_sitzmann}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces CONFETTI overview. (a) Per-subject parametrized fiber bundles ($66$ tracts, $5$ DTI/NODDI metrics); (b) per-tract parametrized fiber axes at $L_0$, computed as a median across each bundle's fibers; (c) SIREN per-subject INR imputation of missing diffusion profiles; (d) hierarchical multi-resolution neighborhood graph ($L_2$, $L_4$, $L_5$ shown), built once over the template axes; (e) three GCN heads sharing the CONFETTI front-end and out-of-fold attribution back-end.}}{3}{}\protected@file@percent }
+\newlabel{fig:pipeline}{{1}{3}{}{figure.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}From fiber tracts to multi-resolution graphs}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Per-subject node features and SIREN imputation}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}GCN architectures for CONFETTI}{3}{}\protected@file@percent }
+\citation{ref_breiman}
+\citation{ref_sundararajan}
+\citation{ref_ying}
+\citation{ref_cohort}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.4}Attribution stack}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}Showcase: Pediatric Down Syndrome}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Dataset and cross-validation protocol}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Imputation evaluation}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Classification: CONFETTI is close to baselines, but with different attribution}{4}{}\protected@file@percent }
+\citation{ref_benjamini}
+\citation{ref_carducci}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Down Syndrome classification: held-out CV AUC and F1 with covariates concatenated at the head. Baselines compute per-tract DTI/NODDI means; CONFETTI uses per-node features under the multi-resolution graph pipeline. Numbers are mean $\pm $ std over $15$ outer folds ($5\times 3$ repeats), best dropout per model.}}{5}{}\protected@file@percent }
+\newlabel{tab:cls}{{1}{5}{}{table.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Validating CONFETTI's divergent finding}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{(i,ii) Raw biology and per-property channels.}{5}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Cross-method tract attribution. Per-method inverse rank (66 minus rank) for the top-12 tracts. The three CONFETTI permutations agree on AC olfactory at rank 1; the baselines top-rank MCP PontoCerebellar Anterior and CC GenuLateral. Two tracts (CC GenuLateral and MCP) appear in $\geq 5/7$ method top-10 lists; AC olfactory is CONFETTI-specific.}}{6}{}\protected@file@percent }
+\newlabel{fig:rank}{{2}{6}{}{figure.2}{}}
+\@writefile{toc}{\contentsline {paragraph}{(iii,iv) Necessity and sufficiency.}{6}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{(v) Within-tract spatial peak.}{6}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.5}Prospective regression: V06 imaging predicts V24 outcomes}{6}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Validation of the AC olfactory finding. Left: per-node Cohen's $d$ along AC olfactory for each diffusion property; horizontal dotted lines mark $|d|=0.5$. Right: classification AUC with the full graph, AC olfactory ablated, and only AC olfactory retained; dashed line is XGBoost.}}{7}{}\protected@file@percent }
+\newlabel{fig:valid}{{3}{7}{}{figure.3}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces V06 imaging predicting V24 outcomes 18 months later. Pearson $r$ on held-out folds (mean over 15 folds; std in parentheses). \textbf  {Bold} = best of row.}}{7}{}\protected@file@percent }
+\newlabel{tab:reg}{{2}{7}{}{table.2}{}}
+\@writefile{toc}{\contentsline {paragraph}{Per-target attribution.}{7}{}\protected@file@percent }
+\bibcite{ref_kipf}{1}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces CONFETTI per-target tract attribution for the V06$\rightarrow $V24 prospective regression (Graph U-Net). Cell colour is the held-out MAE increase under row-tract permutation; bullets mark the top tract per column. AC olfactory tops every column.}}{8}{}\protected@file@percent }
+\newlabel{fig:heat}{{4}{8}{}{figure.4}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Discussion}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Conclusion}{8}{}\protected@file@percent }
+\bibcite{ref_hamilton}{2}
+\bibcite{ref_velickovic}{3}
+\bibcite{ref_gao}{4}
+\bibcite{ref_ying}{5}
+\bibcite{ref_sundararajan}{6}
+\bibcite{ref_breiman}{7}
+\bibcite{ref_chen}{8}
+\bibcite{ref_sitzmann}{9}
+\bibcite{ref_yeatman}{10}
+\bibcite{ref_zhang}{11}
+\bibcite{ref_basser}{12}
+\bibcite{ref_cohort}{13}
+\bibcite{ref_carducci}{14}
+\bibcite{ref_benjamini}{15}
+\gdef \@abspage@last{9}

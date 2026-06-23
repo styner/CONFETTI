@@ -59,7 +59,7 @@ def fig_attr_ranking():
         "GCN":   ("final_with_covariates/gcn/perm_importance_tract_gcn.csv", "importance_mean"),
         "Multi": ("final_with_covariates/multi/perm_importance_tract_multi.csv", "importance_mean"),
         "U-Net": ("final_with_covariates/unet/perm_importance_tract_unet.csv", "importance_mean"),
-        "LogReg ($|\\beta|$)": ("logreg_perm_importance/abs_coef_tract_logreg.csv", "sum_abs_coef"),
+        "LogReg": ("logreg_perm_importance/abs_coef_tract_logreg.csv", "sum_abs_coef"),
         "XGBoost (gain)": ("xgboost_perm_importance/gain_importance_tract_xgboost.csv", "gain_sum"),
         "XGBoost (perm)": ("xgboost_perm_importance/perm_importance_tract_xgboost.csv", "importance_mean"),
     }
@@ -94,11 +94,11 @@ def fig_attr_ranking():
     ax.set_xticklabels(short, rotation=40, ha="right", fontsize=8)
     ax.set_ylabel("Inverse rank (66 = top-ranked, 1 = least)", fontsize=9)
     ax.set_title(
-        "Tract attribution across attribution methods (top 12 tracts by mean GNN rank)",
+        "Tract attribution across methods (top 12 tracts by mean rank)",
         fontsize=10,
     )
     ax.legend(ncol=3, loc="upper right", fontsize=8, frameon=False)
-    ax.set_ylim(0, 70)
+    ax.set_ylim(0, 80)
     ax.tick_params(labelsize=8)
     ax.grid(axis="y", alpha=0.3)
     fig.tight_layout()
@@ -181,32 +181,33 @@ def fig_acolf_validation():
     ax.set_title("Raw group difference along the tract", fontsize=10)
     ax.legend(ncol=5, fontsize=7, frameon=False, loc="upper center")
     ax.tick_params(labelsize=8)
+    ax.set_ylim(-0.9, 1.4)
     ax.grid(alpha=0.3)
 
     # Panel B: ablation AUC summary
     ax = axes[1]
     configs = ["Full graph", "Ablate tract 0", "Only tract 0"]
-    base = {"GCN": 0.913, "Multi": 0.931, "U-Net": 0.940}
-    abl = {"GCN": 0.959, "Multi": 0.929, "U-Net": 0.944}
-    only = {"GCN": 0.761, "Multi": 0.774, "U-Net": 0.752}
+    base = {"Single": 0.913, "Multi": 0.931, "U-Net": 0.940}
+    abl = {"Single": 0.959, "Multi": 0.929, "U-Net": 0.944}
+    only = {"Single": 0.761, "Multi": 0.774, "U-Net": 0.752}
     width = 0.23
     x = np.arange(3)
-    for i, m in enumerate(("GCN", "Multi", "U-Net")):
+    for i, m in enumerate(("Single", "Multi", "U-Net")):
         vals = [base[m], abl[m], only[m]]
         ax.bar(x + (i - 1) * width, vals, width, label=m,
                color=["#377eb8", "#ff7f00", "#4daf4a"][i])
     ax.set_xticks(x)
     ax.set_xticklabels(configs, fontsize=8)
-    ax.set_ylim(0.5, 1.02)
+    ax.set_ylim(0.6, 1.1)
     ax.set_ylabel("CV AUC", fontsize=9)
     ax.set_title("DS classification: necessity / sufficiency", fontsize=10)
     ax.axhline(0.984, color="gray", lw=0.6, ls="--", label="XGBoost")
-    ax.legend(fontsize=7, loc="lower left", frameon=False, ncol=2)
+    ax.legend(fontsize=7, loc="upper right", frameon=False, ncol=2)
     ax.tick_params(labelsize=8)
     ax.grid(axis="y", alpha=0.3)
 
     fig.suptitle(
-        "AC olfactory validation: raw biology (left) and ablation (right)",
+        "AC olfactory tract validation: Raw biology (left) and ablation (right)",
         fontsize=10, y=1.02,
     )
     fig.tight_layout()
