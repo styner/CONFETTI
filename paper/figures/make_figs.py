@@ -345,6 +345,101 @@ def fig_pipeline():
     plt.close(fig)
 
 
+# ---------------------------------------------------------------------------
+# V24 Daily Living: tract + covariate OOF permutation importance (U-Net)
+# ---------------------------------------------------------------------------
+
+
+def fig_dailyliving_importance(top_n: int = 12):
+    """Two-panel bar chart of OOF permutation importance for the V06 -> V24
+    Daily Living Skills regression target (Graph U-Net head): top-N tracts
+    on the left, the three concatenated covariates on the right. Error bars
+    are the fold-wise std reported by nested_cv_regression."""
+    tract_names = tract_name_map()
+    tgt = "V24_DailyLiving"
+    base = RES / "v06_to_v24_regression_perm/unet"
+    tract_df = pd.read_csv(base / f"perm_importance_tract_{tgt}_unet_v24_all.csv")
+    cov_df = pd.read_csv(base / f"perm_importance_covariate_{tgt}_unet_v24_all.csv")
+
+    # Top-N tracts, sorted by mean importance descending
+    tract_df = tract_df.sort_values("importance_mean", ascending=False).head(top_n)
+    labels = [
+        tract_names.get(int(t), str(t)).replace("_", " ")[:22]
+        for t in tract_df["id"].astype(int)
+    ]
+
+    fig, axes = plt.subplots(
+        1, 2, figsize=(7.5, 3.3),
+        gridspec_kw={"width_ratios": [3.5, 1.4], "wspace": 0.45},
+    )
+
+    # --- Left panel: top-N tracts ---
+    base_color = "#4d7ea8"        # sequential single hue, ink-safe on white
+    accent = "#c0563a"            # accent for AC olfactory (rank-1 tract)
+    ax = axes[0]
+    y = np.arange(len(tract_df))
+    colors = [accent if int(tid) == 0 else base_color
+              for tid in tract_df["id"].astype(int)]
+    bars = ax.barh(
+        y, tract_df["importance_mean"].values,
+        xerr=tract_df["importance_std"].values,
+        color=colors, edgecolor="none",
+        error_kw=dict(ecolor="#666", elinewidth=0.9, capsize=2.2),
+        height=0.72,
+    )
+    ax.invert_yaxis()
+    ax.set_yticks(y)
+    ax.set_yticklabels(labels, fontsize=8)
+    ax.set_xlabel("Held-out MAE increase under permutation", fontsize=9)
+    ax.set_title(
+        f"Top {top_n} tracts by OOF permutation importance",
+        fontsize=10, loc="left",
+    )
+    ax.axvline(0, color="#888", lw=0.5)
+    ax.tick_params(axis="x", labelsize=8)
+    ax.grid(axis="x", alpha=0.25, lw=0.6)
+    ax.spines[["top", "right"]].set_visible(False)
+
+    # Emphasize AC olfactory (the top tract) via the y-tick label colour
+    # rather than a redundant direct label overlapping the error bar.
+    if int(tract_df["id"].iloc[0]) == 0:
+        ax.get_yticklabels()[0].set_color(accent)
+        ax.get_yticklabels()[0].set_fontweight("bold")
+
+    # --- Right panel: covariates ---
+    ax = axes[1]
+    cov_order = ["sex", "gestational_age", "num_DWI_artifact"]
+    cov_labels = ["sex", "gest. age", "DWI artifacts"]
+    cov_df = cov_df.set_index("id").loc[cov_order].reset_index()
+    y2 = np.arange(len(cov_order))
+    ax.barh(
+        y2, cov_df["importance_mean"].values,
+        xerr=cov_df["importance_std"].values,
+        color=base_color, edgecolor="none",
+        error_kw=dict(ecolor="#666", elinewidth=0.9, capsize=2.2),
+        height=0.6,
+    )
+    ax.invert_yaxis()
+    ax.set_yticks(y2)
+    ax.set_yticklabels(cov_labels, fontsize=8)
+    ax.set_xlabel("MAE increase", fontsize=9)
+    ax.set_title("Covariates", fontsize=10, loc="left")
+    ax.axvline(0, color="#888", lw=0.5)
+    ax.tick_params(axis="x", labelsize=8)
+    ax.grid(axis="x", alpha=0.25, lw=0.6)
+    ax.spines[["top", "right"]].set_visible(False)
+
+    fig.suptitle(
+        "V06 imaging $\\rightarrow$ V24 Vineland Daily Living Skills "
+        "(Graph U-Net, OOF permutation importance)",
+        fontsize=10.5, y=1.02,
+    )
+    fig.savefig(OUT / "fig_dailyliving_importance.pdf", bbox_inches="tight")
+    fig.savefig(OUT / "fig_dailyliving_importance.png", dpi=180,
+                bbox_inches="tight")
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     fig_pipeline()
     print("  wrote fig_pipeline")
@@ -354,3 +449,5 @@ if __name__ == "__main__":
     print("  wrote fig_target_heatmap")
     fig_acolf_validation()
     print("  wrote fig_acolf_validation")
+    fig_dailyliving_importance()
+    print("  wrote fig_dailyliving_importance")
